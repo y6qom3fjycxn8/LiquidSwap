@@ -118,9 +118,20 @@ export async function initializeFHE(provider?: any): Promise<any> {
   };
   console.log('[FHE] Config:', { ...config, network: 'provider' });
 
-  fheInstance = await sdk.createInstance(config);
-  console.log('[FHE] FHE instance created successfully');
-  return fheInstance;
+  try {
+    // Add timeout for createInstance
+    const instancePromise = sdk.createInstance(config);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('FHE instance creation timeout after 60s')), 60000);
+    });
+
+    fheInstance = await Promise.race([instancePromise, timeoutPromise]);
+    console.log('[FHE] FHE instance created successfully');
+    return fheInstance;
+  } catch (error) {
+    console.error('[FHE] Failed to create FHE instance:', error);
+    throw error;
+  }
 }
 
 export const encryptUint64 = async (
