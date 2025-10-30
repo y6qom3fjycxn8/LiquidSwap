@@ -36,16 +36,23 @@ const Hero = () => {
           
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
-            <Button 
-              size="lg" 
+            <Button
+              size="lg"
+              onClick={() => {
+                const mintSection = document.getElementById('mint');
+                mintSection?.scrollIntoView({ behavior: 'smooth' });
+              }}
               className="bg-gradient-primary hover:shadow-glow transition-all duration-300 text-lg px-8 py-6"
             >
               Launch App
               <ArrowRight className="ml-2 w-5 h-5" />
             </Button>
-            <Button 
-              size="lg" 
+            <Button
+              size="lg"
               variant="outline"
+              onClick={() => {
+                window.open('https://github.com/y6qom3fjycxn8/LiquidSwap', '_blank');
+              }}
               className="border-2 text-lg px-8 py-6 hover:bg-secondary"
             >
               Learn More

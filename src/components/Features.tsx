@@ -35,7 +35,7 @@ const features = [
 
 const Features = () => {
   return (
-    <section className="py-24 px-4 bg-gradient-secondary">
+    <section id="features" className="py-24 px-4 bg-gradient-secondary">
       <div className="container mx-auto max-w-6xl">
         <div className="text-center mb-16 animate-fade-in">
           <div className="inline-flex items-center gap-2 px-4 py-2 mb-6 rounded-full bg-primary/10 border border-primary/20">

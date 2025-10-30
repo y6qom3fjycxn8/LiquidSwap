@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
 
   const navLinks = [
+    { name: "Mint", href: "#mint" },
     { name: "Swap", href: "#swap" },
-    { name: "Pool", href: "#pool" },
-    { name: "Docs", href: "#docs" },
-    { name: "About", href: "#about" },
+    { name: "Features", href: "#features" },
+    { name: "GitHub", href: "https://github.com/y6qom3fjycxn8/LiquidSwap", external: true },
   ];
 
   return (
@@ -34,6 +35,8 @@ const Navbar = () => {
               <a
                 key={link.name}
                 href={link.href}
+                target={(link as any).external ? "_blank" : undefined}
+                rel={(link as any).external ? "noopener noreferrer" : undefined}
                 className="text-sm font-medium text-foreground/80 hover:text-foreground transition-colors relative group"
               >
                 {link.name}
@@ -44,9 +47,7 @@ const Navbar = () => {
 
           {/* Connect Wallet Button */}
           <div className="hidden md:block">
-            <Button className="bg-gradient-primary hover:shadow-glow transition-all font-semibold">
-              Connect Wallet
-            </Button>
+            <ConnectButton />
           </div>
 
           {/* Mobile Menu Button */}
@@ -66,6 +67,8 @@ const Navbar = () => {
                 <a
                   key={link.name}
                   href={link.href}
+                  target={(link as any).external ? "_blank" : undefined}
+                  rel={(link as any).external ? "noopener noreferrer" : undefined}
                   className="text-sm font-medium text-foreground/80 hover:text-foreground transition-colors px-4 py-2 hover:bg-muted rounded-lg"
                   onClick={() => setIsOpen(false)}
                 >
@@ -73,9 +76,7 @@ const Navbar = () => {
                 </a>
               ))}
               <div className="px-4 pt-2">
-                <Button className="w-full bg-gradient-primary hover:shadow-glow transition-all font-semibold">
-                  Connect Wallet
-                </Button>
+                <ConnectButton />
               </div>
             </div>
           </div>

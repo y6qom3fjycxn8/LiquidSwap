@@ -57,7 +57,13 @@ const Index = () => {
                 Join the future of private DeFi. Connect your wallet and start trading
                 with complete confidence.
               </p>
-              <button className="inline-flex items-center gap-2 px-8 py-4 text-lg font-semibold rounded-xl bg-gradient-primary text-primary-foreground hover:shadow-glow transition-all">
+              <button
+                onClick={() => {
+                  const swapSection = document.getElementById('swap');
+                  swapSection?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="inline-flex items-center gap-2 px-8 py-4 text-lg font-semibold rounded-xl bg-gradient-primary text-primary-foreground hover:shadow-glow transition-all cursor-pointer"
+              >
                 Launch App Now
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
