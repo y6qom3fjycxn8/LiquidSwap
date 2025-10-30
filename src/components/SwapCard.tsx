@@ -189,17 +189,12 @@ const SwapCard = () => {
 
       {/* From Token */}
       <div className="space-y-2 mb-2">
-        <div className="flex justify-between">
+        <div className="flex justify-between items-center">
           <Label className="text-sm text-muted-foreground">From</Label>
           {fromBalance && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-auto p-0 text-xs text-muted-foreground hover:text-primary"
-              onClick={handleMaxClick}
-            >
-              Balance: {parseFloat(formatUnits(fromBalance, 18)).toFixed(6)} MAX
-            </Button>
+            <span className="text-xs text-muted-foreground">
+              Balance: {parseFloat(formatUnits(fromBalance, 18)).toFixed(2)}
+            </span>
           )}
         </div>
         <div className="relative">
@@ -215,6 +210,57 @@ const SwapCard = () => {
             {swapDirection === "0to1" ? "LUSD" : "LETH"}
           </div>
         </div>
+
+        {/* Quick Amount Buttons */}
+        {fromBalance && (
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const amount = parseFloat(formatUnits(fromBalance, 18)) * 0.25;
+                setFromAmount(amount.toFixed(6));
+              }}
+              disabled={isSwapping}
+              className="flex-1 text-xs"
+            >
+              25%
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const amount = parseFloat(formatUnits(fromBalance, 18)) * 0.5;
+                setFromAmount(amount.toFixed(6));
+              }}
+              disabled={isSwapping}
+              className="flex-1 text-xs"
+            >
+              50%
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const amount = parseFloat(formatUnits(fromBalance, 18)) * 0.75;
+                setFromAmount(amount.toFixed(6));
+              }}
+              disabled={isSwapping}
+              className="flex-1 text-xs"
+            >
+              75%
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleMaxClick}
+              disabled={isSwapping}
+              className="flex-1 text-xs font-semibold"
+            >
+              MAX
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Swap Direction Button */}
