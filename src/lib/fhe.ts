@@ -20,29 +20,47 @@ let sdkPromise: Promise<any> | null = null;
 
 // Dynamic SDK loading to avoid SSR issues
 const loadSdk = async (): Promise<any> => {
+  console.log('[FHE] Starting SDK load...');
+
   if (typeof window === 'undefined') {
+    console.error('[FHE] Window is undefined - not in browser environment');
     throw new Error('FHE SDK requires browser environment');
   }
 
   if (window.relayerSDK) {
+    console.log('[FHE] SDK already loaded from window.relayerSDK');
     return window.relayerSDK;
   }
 
   if (!sdkPromise) {
+    console.log('[FHE] Creating new SDK promise, loading from:', SDK_URL);
     sdkPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = SDK_URL;
       script.async = true;
       script.onload = () => {
+        console.log('[FHE] SDK script loaded successfully');
         if (window.relayerSDK) {
+          console.log('[FHE] window.relayerSDK is available:', {
+            hasInitSDK: typeof window.relayerSDK.initSDK === 'function',
+            hasCreateInstance: typeof window.relayerSDK.createInstance === 'function',
+            hasSepoliaConfig: !!window.relayerSDK.SepoliaConfig,
+          });
           resolve(window.relayerSDK);
         } else {
+          console.error('[FHE] SDK script loaded but window.relayerSDK is undefined');
           reject(new Error('relayerSDK unavailable after load'));
         }
       };
-      script.onerror = () => reject(new Error('Failed to load FHE SDK'));
+      script.onerror = (error) => {
+        console.error('[FHE] Failed to load SDK script:', error);
+        reject(new Error('Failed to load FHE SDK'));
+      };
       document.body.appendChild(script);
+      console.log('[FHE] SDK script tag appended to body');
     });
+  } else {
+    console.log('[FHE] Reusing existing SDK promise');
   }
 
   return sdkPromise;
@@ -71,24 +89,37 @@ const getEthereumProvider = (provider?: any): any => {
 };
 
 export async function initializeFHE(provider?: any): Promise<any> {
+  console.log('[FHE] initializeFHE called');
+
   if (fheInstance) {
+    console.log('[FHE] Reusing existing FHE instance');
     return fheInstance;
   }
 
+  console.log('[FHE] Loading SDK...');
   const sdk = await loadSdk();
-  await sdk.initSDK();
 
+  console.log('[FHE] Initializing SDK...');
+  await sdk.initSDK();
+  console.log('[FHE] SDK initialized successfully');
+
+  console.log('[FHE] Getting Ethereum provider...');
   const ethereumProvider = getEthereumProvider(provider);
   if (!ethereumProvider) {
+    console.error('[FHE] No Ethereum provider found');
     throw new Error('No Ethereum provider found. Please install MetaMask, OKX Wallet, or Coinbase Wallet.');
   }
+  console.log('[FHE] Ethereum provider found:', ethereumProvider.constructor?.name || 'unknown');
 
+  console.log('[FHE] Creating FHE instance with Sepolia config...');
   const config = {
     ...sdk.SepoliaConfig,
     network: ethereumProvider,
   };
+  console.log('[FHE] Config:', { ...config, network: 'provider' });
 
   fheInstance = await sdk.createInstance(config);
+  console.log('[FHE] FHE instance created successfully');
   return fheInstance;
 }
 
@@ -98,17 +129,26 @@ export const encryptUint64 = async (
   userAddress: string,
   provider?: any
 ): Promise<{ handle: `0x${string}`; proof: `0x${string}` }> => {
+  console.log('[FHE] encryptUint64 called with value:', value);
+
+  console.log('[FHE] Initializing FHE...');
   const fhe = await initializeFHE(provider);
 
   const checksumContract = getAddress(contractAddress);
   const checksumUser = getAddress(userAddress);
+  console.log('[FHE] Addresses - Contract:', checksumContract, 'User:', checksumUser);
 
+  console.log('[FHE] Creating encrypted input...');
   const input = fhe.createEncryptedInput(checksumContract, checksumUser);
   input.add64(value);
 
+  console.log('[FHE] Encrypting...');
   const { handles, inputProof } = await input.encrypt();
+  console.log('[FHE] Encryption complete - Handles:', handles, 'Proof length:', inputProof?.length);
 
-  return ensureHexPayload(handles, inputProof);
+  const result = ensureHexPayload(handles, inputProof);
+  console.log('[FHE] Final result:', { handleLength: result.handle.length, proofLength: result.proof.length });
+  return result;
 };
 
 export const encryptUint128 = async (
