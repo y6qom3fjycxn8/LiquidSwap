@@ -212,7 +212,7 @@ const SwapCard = () => {
             disabled={isSwapping}
           />
           <div className="absolute right-2 top-2 bg-secondary px-4 py-2 rounded-full font-semibold text-sm">
-            {swapDirection === "0to1" ? "TOKEN0" : "TOKEN1"}
+            {swapDirection === "0to1" ? "LUSD" : "LETH"}
           </div>
         </div>
       </div>
@@ -249,7 +249,7 @@ const SwapCard = () => {
             disabled
           />
           <div className="absolute right-2 top-2 bg-secondary px-4 py-2 rounded-full font-semibold text-sm">
-            {swapDirection === "0to1" ? "TOKEN1" : "TOKEN0"}
+            {swapDirection === "0to1" ? "LETH" : "LUSD"}
           </div>
         </div>
       </div>
