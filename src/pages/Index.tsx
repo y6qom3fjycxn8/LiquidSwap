@@ -1,6 +1,7 @@
 import Navbar from "@/components/Navbar";
 import Hero from "@/components/Hero";
 import SwapCard from "@/components/SwapCard";
+import MintCard from "@/components/MintCard";
 import Features from "@/components/Features";
 import Stats from "@/components/Stats";
 import Footer from "@/components/Footer";
@@ -12,6 +13,21 @@ const Index = () => {
       <main>
         <Hero />
         
+        {/* Mint Section */}
+        <section id="mint" className="py-24 px-4 bg-muted/50">
+          <div className="container mx-auto max-w-6xl">
+            <div className="text-center mb-12 animate-fade-in">
+              <h2 className="text-4xl md:text-5xl font-bold mb-4">
+                Get Test Tokens
+              </h2>
+              <p className="text-xl text-muted-foreground">
+                Mint LUSD and LETH tokens to start testing
+              </p>
+            </div>
+            <MintCard />
+          </div>
+        </section>
+
         {/* Swap Section */}
         <section id="swap" className="py-24 px-4 bg-background">
           <div className="container mx-auto max-w-6xl">

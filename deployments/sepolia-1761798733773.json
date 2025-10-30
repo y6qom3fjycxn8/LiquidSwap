@@ -1,0 +1,25 @@
+{
+  "network": "sepolia",
+  "deployer": "0x88Ea5031bB5c71663b922206D11B4D87DB05b26a",
+  "timestamp": "2025-10-30T04:32:13.773Z",
+  "contracts": {
+    "token0": {
+      "address": "0x70eBaf7d823135A68D751ade31A466733a8F3DeC",
+      "name": "Confidential Token A",
+      "symbol": "CTKA"
+    },
+    "token1": {
+      "address": "0x7dF65e2504319b8d440EA047cB43c4855aA738Ac",
+      "name": "Confidential Token B",
+      "symbol": "CTKB"
+    },
+    "cammPairLib": {
+      "address": "0x599D1C42B4AAE9AC930d5Fac4a1A90183D75bf7F"
+    },
+    "cammPair": {
+      "address": "0x031636cDDB38e4eecB89E6d6F148Bf15F8582dE5",
+      "token0": "0x70eBaf7d823135A68D751ade31A466733a8F3DeC",
+      "token1": "0x7dF65e2504319b8d440EA047cB43c4855aA738Ac"
+    }
+  }
+}

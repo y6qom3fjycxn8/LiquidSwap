@@ -314,3 +314,35 @@ export function useRequestLiquidityRemovalRefund() {
     error,
   };
 }
+
+// Hook to mint tokens (for testing)
+export function useMintToken(tokenAddress?: `0x${string}`) {
+  const { writeContract, data: hash, isPending, error } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+
+  const mint = async (
+    to: `0x${string}`,
+    encryptedAmount: `0x${string}`,
+    inputProof: `0x${string}`
+  ) => {
+    if (!tokenAddress) {
+      throw new Error('Token address is required');
+    }
+
+    writeContract({
+      address: tokenAddress,
+      abi: ERC7984_ABI,
+      functionName: 'mint',
+      args: [to, encryptedAmount, inputProof],
+    });
+  };
+
+  return {
+    mint,
+    hash,
+    isPending,
+    isConfirming,
+    isSuccess,
+    error,
+  };
+}

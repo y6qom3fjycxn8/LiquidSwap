@@ -167,14 +167,17 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     }
 
     /**
-     * @dev Modifier to ensure that the action occurs before the deadline epoch.
-     * @param deadlineTimestamp The deadline timestamp.
+     * @dev Modifier to ensure only factory can call certain functions.
      */
     modifier onlyFactory() {
         if (msg.sender != factory) revert Forbidden();
         _;
     }
 
+    /**
+     * @dev Modifier to ensure that the action occurs before the deadline epoch.
+     * @param deadlineTimestamp The deadline timestamp.
+     */
     modifier ensure(uint256 deadlineTimestamp) {
         if (block.timestamp >= deadlineTimestamp) revert Expired();
         _;

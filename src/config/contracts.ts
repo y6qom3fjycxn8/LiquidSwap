@@ -1,11 +1,11 @@
 import { sepolia } from 'wagmi/chains';
 
-// CAMMPair Contract Address on Sepolia (to be filled after deployment)
-export const CAMM_PAIR_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
+// Swap Pair Contract Address on Sepolia
+export const CAMM_PAIR_ADDRESS = '0x3ACF461c0937Da6fA9F1d75823722Bc895C6C521' as const;
 
-// Token addresses (to be filled after deployment)
-export const TOKEN0_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
-export const TOKEN1_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
+// Token addresses (LUSD/LETH)
+export const TOKEN0_ADDRESS = '0x2e6193F89C7823b9C7510DEd5bFeC96A816e32d2' as const;
+export const TOKEN1_ADDRESS = '0xb1dfB53f785a666c52bf5013b34f0fBE0057D6Ca' as const;
 
 export const CHAIN_ID = sepolia.id;
 
@@ -211,6 +211,17 @@ export const ERC7984_ABI = [
     name: 'allowance',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'address', name: 'to', type: 'address' },
+      { internalType: 'externalEuint64', name: 'encryptedAmount', type: 'bytes' },
+      { internalType: 'bytes', name: 'inputProof', type: 'bytes' },
+    ],
+    name: 'mint',
+    outputs: [{ internalType: 'euint64', name: '', type: 'uint256' }],
+    stateMutability: 'nonpayable',
     type: 'function',
   },
 ] as const;
