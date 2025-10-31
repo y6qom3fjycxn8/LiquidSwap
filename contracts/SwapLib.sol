@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import {FHE, externalEuint64, ebool, euint16, euint32, euint64, euint128} from "@fhevm/solidity/lib/FHE.sol";
 
-library CAMMPairLib {
+library SwapLib {
     function computeRNG(uint16 max /* 0 => unbounded */, uint16 minAdd /* 0 => none */) public returns (euint16) {
         euint16 randomNumber = (max == 0) ? FHE.randEuint16() : FHE.randEuint16(max);
         if (minAdd != 0) {

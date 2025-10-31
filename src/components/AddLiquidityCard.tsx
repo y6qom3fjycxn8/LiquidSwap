@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowDownUp, Settings, Loader2 } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Button } from "@/components/ui/button";
@@ -9,24 +9,23 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { parseUnits } from "viem";
 import {
-  useSwapTokens,
+  useAddLiquidity,
   useTokenBalance,
   useToken0Address,
   useToken1Address,
   usePendingDecryptionInfo,
   useApproveToken,
   useTokenAllowance,
-  useHasLiquidity,
 } from "@/hooks/useCAMMPair";
 import { encryptTwoUint64 } from "@/lib/fhe";
 import { CAMM_PAIR_ADDRESS } from "@/config/contracts";
 
-const SwapCard = () => {
+const AddLiquidityCard = () => {
   const { address, isConnected } = useAccount();
-  const [fromAmount, setFromAmount] = useState("");
-  const [isSwapping, setIsSwapping] = useState(false);
+  const [token0Amount, setToken0Amount] = useState("");
+  const [token1Amount, setToken1Amount] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
   const [isEncrypting, setIsEncrypting] = useState(false);
-  const [swapDirection, setSwapDirection] = useState<"0to1" | "1to0">("0to1"); // 0to1 means swap token0 for token1
 
   // Get token addresses
   const { token0Address } = useToken0Address();
@@ -40,34 +39,33 @@ const SwapCard = () => {
   const { allowance: token0Allowance, refetch: refetchAllowance0 } = useTokenAllowance(token0Address, address);
   const { allowance: token1Allowance, refetch: refetchAllowance1 } = useTokenAllowance(token1Address, address);
 
-  const { hasLiquidity } = useHasLiquidity();
-
   // Get pending decryption status
   const { pendingDecryption, refetch: refetchPending } = usePendingDecryptionInfo();
 
   // Contract hooks
-  const { swapTokens, hash, isPending, isConfirming, isSuccess, error } = useSwapTokens();
-  const { approve, hash: approveHash, isPending: isApproving, isConfirming: isApprovingConfirm, isSuccess: isApproved, error: approveError } = useApproveToken();
+  const { addLiquidity, hash, isPending, isConfirming, isSuccess, error } = useAddLiquidity();
+  const {
+    approve,
+    hash: approveHash,
+    isPending: isApproving,
+    isConfirming: isApprovingConfirm,
+    isSuccess: isApproved,
+    error: approveError,
+  } = useApproveToken();
 
-  const fromToken = swapDirection === "0to1" ? token0Address : token1Address;
-  const toToken = swapDirection === "0to1" ? token1Address : token0Address;
-  const fromBalance = swapDirection === "0to1" ? token0Balance : token1Balance;
-  const toBalance = swapDirection === "0to1" ? token1Balance : token0Balance;
-  const fromAllowance = swapDirection === "0to1" ? token0Allowance : token1Allowance;
-
-  // Monitor swap transaction submission
+  // Monitor transaction submission
   useEffect(() => {
     if (isPending) {
-      toast.info("Swap transaction submitted. Waiting for confirmation...");
+      toast.info("Add liquidity transaction submitted. Waiting for confirmation...");
     }
   }, [isPending]);
 
-  // Monitor swap transaction confirmation
+  // Monitor transaction confirmation
   useEffect(() => {
     if (isConfirming && hash) {
       toast.loading(
         <div>
-          <p className="font-semibold">Confirming swap transaction...</p>
+          <p className="font-semibold">Confirming add liquidity transaction...</p>
           <a
             href={`https://sepolia.etherscan.io/tx/${hash}`}
             target="_blank"
@@ -82,14 +80,14 @@ const SwapCard = () => {
     }
   }, [isConfirming, hash]);
 
-  // Monitor swap transaction success
+  // Monitor transaction success
   useEffect(() => {
     if (isSuccess && hash) {
       toast.dismiss(`confirming-${hash}`);
 
       toast.success(
         <div>
-          <p className="font-semibold">✅ Swap successful! Waiting for decryption...</p>
+          <p className="font-semibold">✅ Liquidity added successfully!</p>
           <a
             href={`https://sepolia.etherscan.io/tx/${hash}`}
             target="_blank"
@@ -101,22 +99,23 @@ const SwapCard = () => {
         </div>
       );
 
-      setFromAmount("");
-      setIsSwapping(false);
+      setToken0Amount("");
+      setToken1Amount("");
+      setIsAdding(false);
       refetchToken0();
       refetchToken1();
       refetchPending();
     }
   }, [isSuccess, hash, refetchToken0, refetchToken1, refetchPending]);
 
-  // Monitor swap transaction errors
+  // Monitor transaction errors
   useEffect(() => {
     if (error) {
       if (hash) toast.dismiss(`confirming-${hash}`);
 
       toast.error(
         <div>
-          <p className="font-semibold">❌ Swap failed</p>
+          <p className="font-semibold">❌ Add liquidity failed</p>
           <p className="text-xs mt-1">{error.message}</p>
           {hash && (
             <a
@@ -130,7 +129,7 @@ const SwapCard = () => {
           )}
         </div>
       );
-      setIsSwapping(false);
+      setIsAdding(false);
     }
   }, [error, hash]);
 
@@ -154,7 +153,7 @@ const SwapCard = () => {
     }
   }, [isApprovingConfirm, approveHash]);
 
-  // Monitor approval transaction success
+  // Monitor approval success
   useEffect(() => {
     if (isApproved && approveHash) {
       toast.dismiss(`confirming-${approveHash}`);
@@ -178,7 +177,7 @@ const SwapCard = () => {
     }
   }, [isApproved, approveHash, refetchAllowance0, refetchAllowance1]);
 
-  // Monitor approval transaction errors
+  // Monitor approval errors
   useEffect(() => {
     if (approveError) {
       if (approveHash) toast.dismiss(`confirming-${approveHash}`);
@@ -202,37 +201,33 @@ const SwapCard = () => {
     }
   }, [approveError, approveHash]);
 
-  const handleSwapDirection = () => {
-    setSwapDirection((prev) => (prev === "0to1" ? "1to0" : "0to1"));
-    setFromAmount("");
+  const handleMaxClick = (tokenNumber: 0 | 1) => {
+    const tokenLabel = tokenNumber === 0 ? "LUSD" : "LETH";
+    toast.info(`Balances are encrypted. Please enter your ${tokenLabel} amount manually.`);
   };
 
-  const handleMaxClick = () => {
-    toast.info("Confidential balances cannot be auto-filled. Please enter the amount manually.");
+  const needsAuthorization = (tokenNumber: 0 | 1) => {
+    if (!address) return false;
+    const allowance = tokenNumber === 0 ? token0Allowance : token1Allowance;
+    const tokenAddress = tokenNumber === 0 ? token0Address : token1Address;
+    if (!tokenAddress) return false;
+    return allowance !== true;
   };
 
-  const needsAuthorization = () => {
-    if (!fromToken) return false;
-    return fromAllowance !== true;
-  };
+  const handleApprove = async (tokenNumber: 0 | 1) => {
+    const tokenAddress = tokenNumber === 0 ? token0Address : token1Address;
+    if (!tokenAddress) return;
 
-  const handleApprove = async () => {
-    if (!fromToken) return;
     try {
-      await approve(fromToken);
+      await approve(tokenAddress);
     } catch (err: any) {
       toast.error(err.message || "Authorization failed");
     }
   };
 
-  const handleSwap = async () => {
-    if (!address || !fromAmount) {
-      toast.error("Please enter an amount");
-      return;
-    }
-
-    if (hasLiquidity === false) {
-      toast.error("Pool has no liquidity yet. Please add liquidity first.");
+  const handleAddLiquidity = async () => {
+    if (!address || !token0Amount || !token1Amount) {
+      toast.error("Please enter both token amounts");
       return;
     }
 
@@ -242,66 +237,47 @@ const SwapCard = () => {
     }
 
     try {
-      setIsSwapping(true);
+      setIsAdding(true);
       setIsEncrypting(true);
-      toast.info("Encrypting swap amounts with FHE...");
+      toast.info("Encrypting token amounts with FHE...");
 
-      const fromAmountBigInt = parseUnits(fromAmount, 6);
+      const amount0BigInt = parseUnits(token0Amount, 6);
+      const amount1BigInt = parseUnits(token1Amount, 6);
+
+      // Check uint64 limits
       const MAX_UINT64 = BigInt("18446744073709551615");
-      if (fromAmountBigInt > MAX_UINT64) {
-        throw new Error("Amount too large. Max is 18,446,744.073705 tokens");
+      if (amount0BigInt > MAX_UINT64 || amount1BigInt > MAX_UINT64) {
+        throw new Error("Amount too large. Maximum is 18,446,744,073 tokens");
       }
-      const zeroAmount = BigInt(0);
 
-      // Encrypt both inputs in a single proof to satisfy FHE.fromExternal pairing
-      let encryptedAmount0: `0x${string}`;
-      let encryptedAmount1: `0x${string}`;
-      let proof: `0x${string}`;
-
-      if (swapDirection === "0to1") {
-        const { firstHandle, secondHandle, proof: sharedProof } = await encryptTwoUint64(
-          fromAmountBigInt,
-          zeroAmount,
-          CAMM_PAIR_ADDRESS,
-          address
-        );
-        encryptedAmount0 = firstHandle;
-        encryptedAmount1 = secondHandle;
-        proof = sharedProof;
-      } else {
-        const { firstHandle, secondHandle, proof: sharedProof } = await encryptTwoUint64(
-          zeroAmount,
-          fromAmountBigInt,
-          CAMM_PAIR_ADDRESS,
-          address
-        );
-        encryptedAmount0 = firstHandle;
-        encryptedAmount1 = secondHandle;
-        proof = sharedProof;
-      }
+      const { firstHandle: handle0, secondHandle: handle1, proof } = await encryptTwoUint64(
+        amount0BigInt,
+        amount1BigInt,
+        CAMM_PAIR_ADDRESS,
+        address
+      );
 
       setIsEncrypting(false);
-      toast.success("Encryption complete! Submitting swap...");
+      toast.success("Encryption complete! Adding liquidity...");
 
-      // Set deadline to 20 minutes from now
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
 
-      await swapTokens(encryptedAmount0, encryptedAmount1, address, proof, deadline);
+      await addLiquidity(handle0, handle1, deadline, proof);
     } catch (err: any) {
-      console.error("Swap error:", err);
-      toast.error(err.message || "Failed to swap tokens");
-      setIsSwapping(false);
+      console.error("Add liquidity error:", err);
+      toast.error(err.message || "Failed to add liquidity");
+      setIsAdding(false);
       setIsEncrypting(false);
     }
   };
 
-  const canSwap = () => {
-    if (!isConnected || !fromAmount) return false;
-    if (isSwapping || isPending || isConfirming) return false;
+  const canAddLiquidity = () => {
+    if (!isConnected || !token0Amount || !token1Amount) return false;
+    if (isAdding || isPending || isConfirming) return false;
     if (pendingDecryption?.isPending) return false;
-    if (hasLiquidity === false) return false;
-    const amount = parseFloat(fromAmount);
-    return amount > 0;
+    const amount0 = parseFloat(token0Amount);
+    const amount1 = parseFloat(token1Amount);
+    return amount0 > 0 && amount1 > 0;
   };
 
   const getButtonText = () => {
@@ -310,127 +286,137 @@ const SwapCard = () => {
     if (isPending) return "Confirming Transaction...";
     if (isConfirming) return "Waiting for Confirmation...";
     if (pendingDecryption?.isPending) return "Decryption Pending...";
-    if (hasLiquidity === false) return "Add Liquidity First";
-    if (needsAuthorization()) return "Authorize Token First";
-    return "Swap";
+      if (needsAuthorization(0) || needsAuthorization(1)) return "Authorize Tokens First";
+    return "Add Liquidity";
   };
 
   return (
     <Card className="w-full max-w-md mx-auto p-6 shadow-lg border-2">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Swap</h2>
+        <h2 className="text-2xl font-bold">Add Liquidity</h2>
         <ConnectButton />
       </div>
 
-      {/* From Token */}
-      <div className="space-y-2 mb-2">
+      {/* Token 0 Input */}
+      <div className="space-y-2 mb-4">
         <div className="flex justify-between items-center">
-          <Label className="text-sm text-muted-foreground">From</Label>
-          {fromBalance && <span className="text-xs text-muted-foreground">Balance: Encrypted</span>}
+          <Label className="text-sm text-muted-foreground">LUSD Amount</Label>
+          {token0Balance && <span className="text-xs text-muted-foreground">Balance: Encrypted</span>}
         </div>
         <div className="relative">
           <Input
             type="number"
             placeholder="0.0"
-            value={fromAmount}
-            onChange={(e) => setFromAmount(e.target.value)}
+            value={token0Amount}
+            onChange={(e) => setToken0Amount(e.target.value)}
             className="text-2xl font-semibold h-16 pr-32 border-2"
-            disabled={isSwapping}
+            disabled={isAdding}
           />
-          <div className="absolute right-2 top-2 bg-secondary px-4 py-2 rounded-full font-semibold text-sm">
-            {swapDirection === "0to1" ? "LUSD" : "LETH"}
+          <div className="absolute right-2 top-2 flex gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleMaxClick(0)}
+              disabled={isAdding}
+              className="text-xs font-semibold"
+            >
+              MAX
+            </Button>
+            <div className="bg-secondary px-3 py-2 rounded-full font-semibold text-sm">LUSD</div>
           </div>
         </div>
-
-        <div className="flex gap-2">
+        {needsAuthorization(0) && (
           <Button
             variant="outline"
             size="sm"
-            onClick={handleMaxClick}
-            disabled={isSwapping}
-            className="flex-1 text-xs font-semibold"
+            onClick={() => handleApprove(0)}
+            disabled={isApproving}
+            className="w-full"
           >
-            MAX
+            {isApproving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Authorize LUSD
           </Button>
+        )}
+      </div>
+
+      {/* Plus Icon */}
+      <div className="flex justify-center my-4">
+        <div className="p-2 rounded-full bg-secondary">
+          <Plus className="w-5 h-5" />
         </div>
       </div>
 
-      {/* Swap Direction Button */}
-      <div className="flex justify-center my-4">
-        <Button
-          variant="outline"
-          size="icon"
-          className="rounded-full border-4 border-background shadow-md hover:shadow-lg transition-all hover:rotate-180 duration-300"
-          onClick={handleSwapDirection}
-          disabled={isSwapping}
-        >
-          <ArrowDownUp className="w-5 h-5" />
-        </Button>
-      </div>
-
-      {/* To Token */}
+      {/* Token 1 Input */}
       <div className="space-y-2 mb-6">
-        <div className="flex justify-between">
-          <Label className="text-sm text-muted-foreground">To (estimated)</Label>
-          {toBalance && <span className="text-xs text-muted-foreground">Balance: Encrypted</span>}
+        <div className="flex justify-between items-center">
+          <Label className="text-sm text-muted-foreground">LETH Amount</Label>
+          {token1Balance && <span className="text-xs text-muted-foreground">Balance: Encrypted</span>}
         </div>
         <div className="relative">
           <Input
-            type="text"
+            type="number"
             placeholder="0.0"
-            value="~"
+            value={token1Amount}
+            onChange={(e) => setToken1Amount(e.target.value)}
             className="text-2xl font-semibold h-16 pr-32 border-2"
-            disabled
+            disabled={isAdding}
           />
-          <div className="absolute right-2 top-2 bg-secondary px-4 py-2 rounded-full font-semibold text-sm">
-            {swapDirection === "0to1" ? "LETH" : "LUSD"}
+          <div className="absolute right-2 top-2 flex gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleMaxClick(1)}
+              disabled={isAdding}
+              className="text-xs font-semibold"
+            >
+              MAX
+            </Button>
+            <div className="bg-secondary px-3 py-2 rounded-full font-semibold text-sm">LETH</div>
           </div>
         </div>
+        {needsAuthorization(1) && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleApprove(1)}
+            disabled={isApproving}
+            className="w-full"
+          >
+            {isApproving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Authorize LETH
+          </Button>
+        )}
       </div>
 
-      {/* Encrypted Transaction Notice */}
+      {/* FHE Info */}
       <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 mb-6">
         <div className="flex items-start gap-3">
           <div className="p-2 rounded-lg bg-primary/10 mt-0.5">
             <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+              />
             </svg>
           </div>
           <div>
-            <p className="font-semibold text-sm mb-1">FHE-Encrypted Swap</p>
+            <p className="font-semibold text-sm mb-1">FHE-Encrypted Liquidity</p>
             <p className="text-xs text-muted-foreground">
-              Your swap amounts are encrypted end-to-end using Zama FHE technology
+              Your liquidity amounts are encrypted end-to-end using Zama FHE technology
             </p>
           </div>
         </div>
       </div>
 
-      {/* Approve/Swap Button */}
-      {needsAuthorization() ? (
-        <Button
-          className="w-full h-14 text-lg font-semibold mb-2"
-          onClick={handleApprove}
-          disabled={isApproving}
-        >
-          {isApproving && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-          Authorize {swapDirection === "0to1" ? "LUSD" : "LETH"}
-        </Button>
-      ) : null}
-
+      {/* Add Liquidity Button */}
       <Button
         className="w-full h-14 text-lg font-semibold bg-gradient-primary hover:shadow-glow transition-all"
-        disabled={hasLiquidity !== false && (!canSwap() || needsAuthorization())}
-        onClick={() => {
-          if (hasLiquidity === false) {
-            // Navigate to mint section to add liquidity
-            document.getElementById('liquidity')?.scrollIntoView({ behavior: 'smooth' });
-            toast.info('Please add liquidity to the pool first');
-          } else {
-            handleSwap();
-          }
-        }}
+        disabled={!canAddLiquidity() || needsAuthorization(0) || needsAuthorization(1)}
+        onClick={handleAddLiquidity}
       >
-        {(isSwapping || isPending || isConfirming) && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
+        {(isAdding || isPending || isConfirming) && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
         {getButtonText()}
       </Button>
 
@@ -446,4 +432,4 @@ const SwapCard = () => {
   );
 };
 
-export default SwapCard;
+export default AddLiquidityCard;

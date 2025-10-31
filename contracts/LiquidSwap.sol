@@ -6,7 +6,7 @@ import {FHE, externalEuint64, ebool, euint16, euint32, euint64, euint128} from "
 import {SepoliaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {ERC7984} from "./OZ-confidential-contracts-fork/ERC7984.sol";
 import {IERC7984} from "./OZ-confidential-contracts-fork/IERC7984.sol";
-import {CAMMPairLib} from "./CAMMPairLib.sol";
+import {SwapLib} from "./SwapLib.sol";
 
 /**
  * To beat (Dangerously close to size limit): 
@@ -19,7 +19,7 @@ import {CAMMPairLib} from "./CAMMPairLib.sol";
  ·························|································|·································
  |  CAMMPair              ·                20.855 (0.000)  ·                22.729 (0.000)  │
  ·························|································|·································
- |  CAMMPairLib           ·                 5.082 (0.000)  ·                 5.113 (0.000)  │
+ |  SwapLib           ·                 5.082 (0.000)  ·                 5.113 (0.000)  │
  ·------------------------|--------------------------------|--------------------------------·
  */
 /**
@@ -258,6 +258,13 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     }
 
     /**
+     * @dev Returns true once the minimum liquidity has been locked, meaning the pool holds assets.
+     */
+    function hasLiquidity() external view returns (bool) {
+        return minLiquidityLocked;
+    }
+
+    /**
      * @dev Checks whether an address already has access to obfuscated reserves.
      */
     function isReserveViewer(address viewer) external view returns (bool) {
@@ -297,7 +304,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
      *      Computed price from obfuscated reserve is +- 7% close to the real price.
      */
     function _updateObfuscatedReserves() internal {
-        (euint128 _obfuscatedReserve0, euint128 _obfuscatedReserve1) = CAMMPairLib.computeObfuscatedReserves(
+        (euint128 _obfuscatedReserve0, euint128 _obfuscatedReserve1) = SwapLib.computeObfuscatedReserves(
             reserve0,
             reserve1,
             scalingFactor
@@ -441,7 +448,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
      * @param amount1 The amount of token1 provided.
      */
     function _firstMint(address to, euint64 amount0, euint64 amount1) internal {
-        (euint64 liquidityAmount, euint64 amount0Back, euint64 amount1Back) = CAMMPairLib.computeFirstMint(
+        (euint64 liquidityAmount, euint64 amount0Back, euint64 amount1Back) = SwapLib.computeFirstMint(
             amount0,
             amount1,
             MINIMUM_LIQUIDITY
@@ -524,7 +531,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
                 euint128 divLowerPart1,
                 euint128 partialUpperPart0,
                 euint128 partialUpperPart1
-            ) = CAMMPairLib.computeAddLiquidity(reserve0, reserve1, currentLPSupply);
+            ) = SwapLib.computeAddLiquidity(reserve0, reserve1, currentLPSupply);
 
             bytes32[] memory cts = new bytes32[](4);
             cts[0] = FHE.toBytes32(divLowerPart0);
@@ -599,7 +606,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
             euint64 mintAmount,
             euint64 amount0,
             euint64 amount1
-        ) = CAMMPairLib.computeAddLiquidityCallback(
+        ) = SwapLib.computeAddLiquidityCallback(
                 sentAmount0,
                 sentAmount1,
                 partialUpperPart0,
@@ -636,7 +643,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         euint64 sentLP = _transferLPToPool(from, lpAmount);
         euint128 currentLPSupply128 = FHE.asEuint128(confidentialTotalSupply());
 
-        (euint128 divUpperPart0, euint128 divUpperPart1, euint128 divLowerPart0, euint128 divLowerPart1) = CAMMPairLib
+        (euint128 divUpperPart0, euint128 divUpperPart1, euint128 divLowerPart0, euint128 divLowerPart1) = SwapLib
             .computeRemoveLiquidity(reserve0, reserve1, sentLP, currentLPSupply128);
 
         bytes32[] memory cts = new bytes32[](2);
@@ -658,7 +665,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         pendingDecryption.currentRequestID = requestID;
         pendingDecryption.decryptionTimestamp = block.timestamp;
         pendingDecryption.isPendingDecryption = true;
-        pendingDecryption.operation = Operation.Swap;
         pendingDecryption.operation = Operation.RemoveLiquidity;
 
         liquidityRemovalRefund[from][requestID].lpAmount = sentLP;
@@ -808,7 +814,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     ) internal ensure(deadline) decryptionAvailable {
         (euint64 sent0, euint64 sent1) = _transferTokensToPool(from, amount0In, amount1In, true);
 
-        (euint128 divUpperPart0, euint128 divUpperPart1, euint128 divLowerPart0, euint128 divLowerPart1) = CAMMPairLib
+        (euint128 divUpperPart0, euint128 divUpperPart1, euint128 divLowerPart0, euint128 divLowerPart1) = SwapLib
             .computeSwap(sent0, sent1, reserve0, reserve1);
 
         bytes32[] memory cts = new bytes32[](2);
@@ -832,6 +838,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         pendingDecryption.currentRequestID = requestID;
         pendingDecryption.decryptionTimestamp = block.timestamp;
         pendingDecryption.isPendingDecryption = true;
+        pendingDecryption.operation = Operation.Swap;
 
         standardRefund[from][requestID].amount0 = sent0;
         standardRefund[from][requestID].amount1 = sent1;
@@ -866,7 +873,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         address from = swapDecBundle[requestID].from;
         address to = swapDecBundle[requestID].to;
 
-        // always fits, check overflow computation in CAMMPairLib.computeSwap() comments.
+        // always fits, check overflow computation in SwapLib.computeSwap() comments.
         euint64 amount0Out = FHE.asEuint64(FHE.div(_divUpperPart0, _divLowerPart0));
         euint64 amount1Out = FHE.asEuint64(FHE.div(_divUpperPart1, _divLowerPart1));
 

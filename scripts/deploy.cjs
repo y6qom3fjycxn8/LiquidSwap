@@ -37,17 +37,17 @@ async function main() {
 
   // Step 3: Deploy PairLib library
   console.log('📦 Step 3: Deploying Swap Library...');
-  const CAMMPairLib = await hre.ethers.getContractFactory('CAMMPairLib');
-  const cammPairLib = await CAMMPairLib.deploy();
-  await cammPairLib.waitForDeployment();
-  const cammPairLibAddress = await cammPairLib.getAddress();
-  console.log('✅ Swap Library deployed to:', cammPairLibAddress, '\n');
+  const SwapLib = await hre.ethers.getContractFactory('SwapLib');
+  const swapLib = await SwapLib.deploy();
+  await swapLib.waitForDeployment();
+  const swapLibAddress = await swapLib.getAddress();
+  console.log('✅ Swap Library deployed to:', swapLibAddress, '\n');
 
   // Step 4: Deploy Swap Pair with linked library
   console.log('📦 Step 4: Deploying Swap Pair Contract...');
   const CAMMPair = await hre.ethers.getContractFactory('CAMMPair', {
     libraries: {
-      CAMMPairLib: cammPairLibAddress,
+      SwapLib: swapLibAddress,
     },
   });
   const cammPair = await CAMMPair.deploy(hre.ethers.ZeroAddress);
@@ -61,21 +61,10 @@ async function main() {
   await initTx.wait();
   console.log('✅ Swap Pair initialized successfully\n');
 
-  // Step 6: Mint initial tokens to deployer (optional, for testing)
-  console.log('📦 Step 6: Minting initial tokens for testing...');
-  const mintAmount = 1000000; // 1M tokens each (plaintext)
+  // Step 6: Initial minting will be done through the frontend
+  console.log('📦 Step 6: Initial token minting...');
+  console.log('ℹ️  Tokens can be minted through the frontend using encrypted inputs\n');
 
-  try {
-    const mint0Tx = await token0.mintPlaintext(deployer.address, mintAmount);
-    await mint0Tx.wait();
-    console.log('✅ Minted 1,000,000 LUSD to deployer');
-
-    const mint1Tx = await token1.mintPlaintext(deployer.address, mintAmount);
-    await mint1Tx.wait();
-    console.log('✅ Minted 1,000,000 LETH to deployer\n');
-  } catch (error) {
-    console.log('⚠️  Skipping initial minting (can be done later)\n');
-  }
 
   // Save deployment info
   const deploymentInfo = {
@@ -94,7 +83,7 @@ async function main() {
         symbol: 'LETH',
       },
       swapLib: {
-        address: cammPairLibAddress,
+        address: swapLibAddress,
       },
       swapPair: {
         address: cammPairAddress,

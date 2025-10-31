@@ -1,6 +1,5 @@
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { CAMM_PAIR_ADDRESS, CAMM_PAIR_ABI, TOKEN0_ADDRESS, TOKEN1_ADDRESS, ERC7984_ABI } from '@/config/contracts';
-import { parseUnits, formatUnits } from 'viem';
 
 export interface PendingDecryption {
   requestID: bigint;
@@ -102,12 +101,12 @@ export function useTokenBalance(tokenAddress?: `0x${string}`, userAddress?: `0x$
   const { data, isLoading, error, refetch } = useReadContract({
     address: tokenAddress,
     abi: ERC7984_ABI,
-    functionName: 'balanceOf',
+    functionName: 'confidentialBalanceOf',
     args: tokenAddress && userAddress ? [userAddress] : undefined,
   });
 
   return {
-    balance: data as bigint | undefined,
+    balance: data as `0x${string}` | undefined,
     isLoading,
     error,
     refetch,
@@ -119,12 +118,12 @@ export function useTokenAllowance(tokenAddress?: `0x${string}`, ownerAddress?: `
   const { data, isLoading, error, refetch } = useReadContract({
     address: tokenAddress,
     abi: ERC7984_ABI,
-    functionName: 'allowance',
+    functionName: 'isOperator',
     args: tokenAddress && ownerAddress ? [ownerAddress, CAMM_PAIR_ADDRESS] : undefined,
   });
 
   return {
-    allowance: data as bigint | undefined,
+    allowance: data as boolean | undefined,
     isLoading,
     error,
     refetch,
@@ -136,12 +135,12 @@ export function useApproveToken() {
   const { writeContract, data: hash, isPending, error } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
-  const approve = async (tokenAddress: `0x${string}`, amount: bigint) => {
+  const approve = async (tokenAddress: `0x${string}`) => {
     writeContract({
       address: tokenAddress,
       abi: ERC7984_ABI,
-      functionName: 'approve',
-      args: [CAMM_PAIR_ADDRESS, amount],
+      functionName: 'setOperator',
+      args: [CAMM_PAIR_ADDRESS, BigInt(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60)],
     });
   };
 
@@ -155,6 +154,22 @@ export function useApproveToken() {
   };
 }
 
+// Hook to check if pool already holds liquidity
+export function useHasLiquidity() {
+  const { data, isLoading, error, refetch } = useReadContract({
+    address: CAMM_PAIR_ADDRESS,
+    abi: CAMM_PAIR_ABI,
+    functionName: 'hasLiquidity',
+  });
+
+  return {
+    hasLiquidity: data as boolean | undefined,
+    isLoading,
+    error,
+    refetch,
+  };
+}
+
 // Hook to add liquidity with FHE encryption
 export function useAddLiquidity() {
   const { writeContract, data: hash, isPending, error } = useWriteContract();
@@ -163,8 +178,8 @@ export function useAddLiquidity() {
   const addLiquidity = async (
     encryptedAmount0: `0x${string}`,
     encryptedAmount1: `0x${string}`,
-    inputProof: `0x${string}`,
-    deadline: bigint
+    deadline: bigint,
+    inputProof: `0x${string}`
   ) => {
     writeContract({
       address: CAMM_PAIR_ADDRESS,

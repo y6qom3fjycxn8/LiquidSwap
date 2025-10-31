@@ -2,6 +2,7 @@ import Navbar from "@/components/Navbar";
 import Hero from "@/components/Hero";
 import SwapCard from "@/components/SwapCard";
 import MintCard from "@/components/MintCard";
+import AddLiquidityCard from "@/components/AddLiquidityCard";
 import Features from "@/components/Features";
 import Stats from "@/components/Stats";
 import Footer from "@/components/Footer";
@@ -28,8 +29,23 @@ const Index = () => {
           </div>
         </section>
 
+        {/* Add Liquidity Section */}
+        <section id="liquidity" className="py-24 px-4 bg-background">
+          <div className="container mx-auto max-w-6xl">
+            <div className="text-center mb-12 animate-fade-in">
+              <h2 className="text-4xl md:text-5xl font-bold mb-4">
+                Add Liquidity
+              </h2>
+              <p className="text-xl text-muted-foreground">
+                Provide liquidity to earn trading fees
+              </p>
+            </div>
+            <AddLiquidityCard />
+          </div>
+        </section>
+
         {/* Swap Section */}
-        <section id="swap" className="py-24 px-4 bg-background">
+        <section id="swap" className="py-24 px-4 bg-muted/50">
           <div className="container mx-auto max-w-6xl">
             <div className="text-center mb-12 animate-fade-in">
               <h2 className="text-4xl md:text-5xl font-bold mb-4">

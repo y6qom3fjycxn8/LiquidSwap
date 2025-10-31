@@ -1,11 +1,11 @@
 import { sepolia } from 'wagmi/chains';
 
 // Swap Pair Contract Address on Sepolia
-export const CAMM_PAIR_ADDRESS = '0x3ACF461c0937Da6fA9F1d75823722Bc895C6C521' as const;
+export const CAMM_PAIR_ADDRESS = '0x6dFD65dC099C04362E19bB1dE60D63D3158a6844' as const;
 
 // Token addresses (LUSD/LETH)
-export const TOKEN0_ADDRESS = '0x2e6193F89C7823b9C7510DEd5bFeC96A816e32d2' as const;
-export const TOKEN1_ADDRESS = '0xb1dfB53f785a666c52bf5013b34f0fBE0057D6Ca' as const;
+export const TOKEN0_ADDRESS = '0xA87F4bAE7F4E267D64fFC222377B9acA9bf98e41' as const;
+export const TOKEN1_ADDRESS = '0xfE25b303ea656F8a692ab85B7484A1b94A8249De' as const;
 
 export const CHAIN_ID = sepolia.id;
 
@@ -66,12 +66,19 @@ export const CAMM_PAIR_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [],
+    name: 'hasLiquidity',
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
 
   // Write functions - Add Liquidity (encrypted)
   {
     inputs: [
-      { internalType: 'externalEuint64', name: 'amount0', type: 'bytes' },
-      { internalType: 'externalEuint64', name: 'amount1', type: 'bytes' },
+      { internalType: 'externalEuint64', name: 'amount0', type: 'bytes32' },
+      { internalType: 'externalEuint64', name: 'amount1', type: 'bytes32' },
       { internalType: 'uint256', name: 'deadline', type: 'uint256' },
       { internalType: 'bytes', name: 'inputProof', type: 'bytes' },
     ],
@@ -84,7 +91,7 @@ export const CAMM_PAIR_ABI = [
   // Write functions - Remove Liquidity (encrypted)
   {
     inputs: [
-      { internalType: 'externalEuint64', name: 'lpAmount', type: 'bytes' },
+      { internalType: 'externalEuint64', name: 'lpAmount', type: 'bytes32' },
       { internalType: 'address', name: 'to', type: 'address' },
       { internalType: 'uint256', name: 'deadline', type: 'uint256' },
       { internalType: 'bytes', name: 'inputProof', type: 'bytes' },
@@ -98,8 +105,8 @@ export const CAMM_PAIR_ABI = [
   // Write functions - Swap Tokens (encrypted)
   {
     inputs: [
-      { internalType: 'externalEuint64', name: 'encryptedAmount0In', type: 'bytes' },
-      { internalType: 'externalEuint64', name: 'encryptedAmount1In', type: 'bytes' },
+      { internalType: 'externalEuint64', name: 'encryptedAmount0In', type: 'bytes32' },
+      { internalType: 'externalEuint64', name: 'encryptedAmount1In', type: 'bytes32' },
       { internalType: 'address', name: 'to', type: 'address' },
       { internalType: 'uint256', name: 'deadline', type: 'uint256' },
       { internalType: 'bytes', name: 'inputProof', type: 'bytes' },
@@ -181,46 +188,39 @@ export const CAMM_PAIR_ABI = [
 export const ERC7984_ABI = [
   {
     inputs: [{ internalType: 'address', name: 'account', type: 'address' }],
-    name: 'balanceOf',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [],
-    name: 'totalSupply',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    name: 'confidentialBalanceOf',
+    outputs: [{ internalType: 'euint64', name: '', type: 'bytes32' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [
+      { internalType: 'address', name: 'holder', type: 'address' },
       { internalType: 'address', name: 'spender', type: 'address' },
-      { internalType: 'uint256', name: 'value', type: 'uint256' },
     ],
-    name: 'approve',
+    name: 'isOperator',
     outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'address', name: 'operator', type: 'address' },
+      { internalType: 'uint48', name: 'until', type: 'uint48' },
+    ],
+    name: 'setOperator',
+    outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
   },
   {
     inputs: [
-      { internalType: 'address', name: 'owner', type: 'address' },
-      { internalType: 'address', name: 'spender', type: 'address' },
-    ],
-    name: 'allowance',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [
       { internalType: 'address', name: 'to', type: 'address' },
-      { internalType: 'externalEuint64', name: 'encryptedAmount', type: 'bytes' },
+      { internalType: 'externalEuint64', name: 'encryptedAmount', type: 'bytes32' },
       { internalType: 'bytes', name: 'inputProof', type: 'bytes' },
     ],
     name: 'mint',
-    outputs: [{ internalType: 'euint64', name: '', type: 'uint256' }],
+    outputs: [{ internalType: 'euint64', name: '', type: 'bytes32' }],
     stateMutability: 'nonpayable',
     type: 'function',
   },

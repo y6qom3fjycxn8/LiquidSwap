@@ -1,4 +1,4 @@
-import { getAddress, toHex } from 'viem';
+import { hexlify, getAddress } from "ethers";
 
 declare global {
   interface Window {
@@ -8,192 +8,257 @@ declare global {
       SepoliaConfig: Record<string, unknown>;
     };
     ethereum?: any;
-    okxwallet?: { provider?: any } | any;
-    coinbaseWalletExtension?: any;
+    okxwallet?: any;
   }
 }
-
-const SDK_URL = 'https://cdn.zama.ai/relayer-sdk-js/0.2.0/relayer-sdk-js.umd.cjs';
 
 let fheInstance: any = null;
 let sdkPromise: Promise<any> | null = null;
 
-// Dynamic SDK loading to avoid SSR issues
-const loadSdk = async (): Promise<any> => {
-  console.log('[FHE] Starting SDK load...');
+const SDK_URL = 'https://cdn.zama.ai/relayer-sdk-js/0.2.0/relayer-sdk-js.umd.cjs';
 
+/**
+ * Dynamically load Zama FHE SDK from CDN
+ */
+const loadSdk = async (): Promise<any> => {
   if (typeof window === 'undefined') {
-    console.error('[FHE] Window is undefined - not in browser environment');
     throw new Error('FHE SDK requires browser environment');
   }
 
   if (window.relayerSDK) {
-    console.log('[FHE] SDK already loaded from window.relayerSDK');
+    console.log('✅ SDK already loaded');
     return window.relayerSDK;
   }
 
   if (!sdkPromise) {
-    console.log('[FHE] Creating new SDK promise, loading from:', SDK_URL);
     sdkPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${SDK_URL}"]`) as HTMLScriptElement | null;
+      if (existing) {
+        console.log('⏳ SDK script tag exists, waiting...');
+        // Wait a bit for SDK to initialize
+        const checkInterval = setInterval(() => {
+          if (window.relayerSDK) {
+            clearInterval(checkInterval);
+            resolve(window.relayerSDK);
+          }
+        }, 100);
+
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          if (window.relayerSDK) {
+            resolve(window.relayerSDK);
+          } else {
+            reject(new Error('SDK script exists but window.relayerSDK not initialized'));
+          }
+        }, 5000);
+        return;
+      }
+
+      console.log('📦 Loading SDK from CDN...');
       const script = document.createElement('script');
       script.src = SDK_URL;
       script.async = true;
+
       script.onload = () => {
-        console.log('[FHE] SDK script loaded successfully');
-        if (window.relayerSDK) {
-          console.log('[FHE] window.relayerSDK is available:', {
-            hasInitSDK: typeof window.relayerSDK.initSDK === 'function',
-            hasCreateInstance: typeof window.relayerSDK.createInstance === 'function',
-            hasSepoliaConfig: !!window.relayerSDK.SepoliaConfig,
-          });
-          resolve(window.relayerSDK);
-        } else {
-          console.error('[FHE] SDK script loaded but window.relayerSDK is undefined');
-          reject(new Error('relayerSDK unavailable after load'));
-        }
+        console.log('📦 Script loaded, waiting for SDK initialization...');
+        // Give SDK time to initialize
+        setTimeout(() => {
+          if (window.relayerSDK) {
+            console.log('✅ SDK initialized');
+            resolve(window.relayerSDK);
+          } else {
+            console.error('❌ window.relayerSDK still undefined after load');
+            reject(new Error('relayerSDK unavailable after load'));
+          }
+        }, 500);
       };
-      script.onerror = (error) => {
-        console.error('[FHE] Failed to load SDK script:', error);
+
+      script.onerror = () => {
+        console.error('❌ Failed to load SDK script');
         reject(new Error('Failed to load FHE SDK'));
       };
+
       document.body.appendChild(script);
-      console.log('[FHE] SDK script tag appended to body');
     });
-  } else {
-    console.log('[FHE] Reusing existing SDK promise');
   }
 
   return sdkPromise;
 };
 
-// Get the proper provider from various wallet types
-const getEthereumProvider = (provider?: any): any => {
-  if (provider) return provider;
-  if (typeof window === 'undefined') return null;
-
-  // Try OKX Wallet first
-  if (window.okxwallet?.provider) {
-    return window.okxwallet.provider;
-  }
-  if (window.okxwallet && typeof window.okxwallet.request === 'function') {
-    return window.okxwallet;
-  }
-
-  // Try Coinbase Wallet
-  if (window.coinbaseWalletExtension) {
-    return window.coinbaseWalletExtension;
-  }
-
-  // Default to MetaMask/injected
-  return window.ethereum;
-};
-
+/**
+ * Initialize FHE instance with Sepolia network configuration
+ * Supports multiple wallet providers (MetaMask, OKX, Coinbase)
+ */
 export async function initializeFHE(provider?: any): Promise<any> {
-  console.log('[FHE] initializeFHE called');
-
   if (fheInstance) {
-    console.log('[FHE] Reusing existing FHE instance');
     return fheInstance;
   }
 
-  console.log('[FHE] Loading SDK...');
-  const sdk = await loadSdk();
-
-  console.log('[FHE] Initializing SDK...');
-  await sdk.initSDK();
-  console.log('[FHE] SDK initialized successfully');
-
-  console.log('[FHE] Getting Ethereum provider...');
-  const ethereumProvider = getEthereumProvider(provider);
-  if (!ethereumProvider) {
-    console.error('[FHE] No Ethereum provider found');
-    throw new Error('No Ethereum provider found. Please install MetaMask, OKX Wallet, or Coinbase Wallet.');
+  if (typeof window === 'undefined') {
+    throw new Error('FHE SDK requires browser environment');
   }
-  console.log('[FHE] Ethereum provider found:', ethereumProvider.constructor?.name || 'unknown');
 
-  console.log('[FHE] Creating FHE instance with Sepolia config...');
+  // Get Ethereum provider from multiple sources
+  // Priority: passed provider > window.ethereum > window.okxwallet > window.coinbaseWalletExtension
+  const ethereumProvider = provider ||
+    window.ethereum ||
+    (window as any).okxwallet?.provider ||
+    (window as any).okxwallet ||
+    (window as any).coinbaseWalletExtension;
+
+  if (!ethereumProvider) {
+    throw new Error('Ethereum provider not found. Please connect your wallet first.');
+  }
+
+  console.log('🔌 Using Ethereum provider:', {
+    isOKX: !!(window as any).okxwallet,
+    isMetaMask: !!(window.ethereum as any)?.isMetaMask,
+    provider: ethereumProvider
+  });
+
+  const sdk = await loadSdk();
+  if (!sdk) {
+    throw new Error('FHE SDK not available');
+  }
+
+  await sdk.initSDK();
+
+  // Use the built-in SepoliaConfig from the SDK
   const config = {
     ...sdk.SepoliaConfig,
     network: ethereumProvider,
   };
-  console.log('[FHE] Config:', { ...config, network: 'provider' });
 
-  try {
-    // Add timeout for createInstance
-    const instancePromise = sdk.createInstance(config);
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('FHE instance creation timeout after 60s')), 60000);
-    });
+  fheInstance = await sdk.createInstance(config);
+  console.log('✅ FHE instance initialized for Sepolia');
 
-    fheInstance = await Promise.race([instancePromise, timeoutPromise]);
-    console.log('[FHE] FHE instance created successfully');
-    return fheInstance;
-  } catch (error) {
-    console.error('[FHE] Failed to create FHE instance:', error);
-    throw error;
-  }
+  return fheInstance;
 }
 
+/**
+ * Encrypt uint8 value (for option selection 0-255)
+ */
+export async function encryptOption(
+  option: number,
+  contractAddress: string,
+  userAddress: string,
+  provider?: any
+): Promise<{ handle: string; proof: string }> {
+  const fhe = await initializeFHE(provider);
+  const checksumAddress = getAddress(contractAddress);
+
+  const input = fhe.createEncryptedInput(checksumAddress, userAddress);
+  input.add8(option);
+
+  const { handles, inputProof } = await input.encrypt();
+
+  return {
+    handle: normalizeBytes32(handles[0]),
+    proof: hexlify(inputProof),
+  };
+}
+
+/**
+ * Encrypt uint64 value (for bet amounts)
+ */
+export async function encryptAmount(
+  amount: bigint,
+  contractAddress: string,
+  userAddress: string,
+  provider?: any
+): Promise<{ handle: string; proof: string }> {
+  const fhe = await initializeFHE(provider);
+  const checksumAddress = getAddress(contractAddress);
+
+  const input = fhe.createEncryptedInput(checksumAddress, userAddress);
+  input.add64(amount);
+
+  const { handles, inputProof } = await input.encrypt();
+
+  return {
+    handle: normalizeBytes32(handles[0]),
+    proof: hexlify(inputProof),
+  };
+}
+
+/**
+ * Encrypt both option and amount in single proof
+ * This is more gas-efficient than two separate encryptions
+ */
+export async function encryptBet(
+  option: number,
+  amountWei: bigint,
+  contractAddress: string,
+  userAddress: string,
+  provider?: any
+): Promise<{ optionHandle: string; amountHandle: string; proof: string }> {
+  const fhe = await initializeFHE(provider);
+  const checksumAddress = getAddress(contractAddress);
+
+  const input = fhe.createEncryptedInput(checksumAddress, userAddress);
+
+  input.add8(option);
+  input.add64(amountWei);
+
+  const { handles, inputProof } = await input.encrypt();
+
+  return {
+    optionHandle: normalizeBytes32(handles[0]),
+    amountHandle: normalizeBytes32(handles[1]),
+    proof: hexlify(inputProof),
+  };
+}
+
+/**
+ * Encrypt uint64 value for FHE operations
+ * This is the main function used by LiquidSwap
+ */
 export const encryptUint64 = async (
   value: bigint,
   contractAddress: string,
   userAddress: string,
   provider?: any
 ): Promise<{ handle: `0x${string}`; proof: `0x${string}` }> => {
-  console.log('[FHE] encryptUint64 called with value:', value);
-
-  console.log('[FHE] Initializing FHE...');
-  const fhe = await initializeFHE(provider);
-
-  const checksumContract = getAddress(contractAddress);
-  const checksumUser = getAddress(userAddress);
-  console.log('[FHE] Addresses - Contract:', checksumContract, 'User:', checksumUser);
-
-  console.log('[FHE] Creating encrypted input...');
-  const input = fhe.createEncryptedInput(checksumContract, checksumUser);
-  input.add64(value);
-
-  console.log('[FHE] Encrypting...');
-  const { handles, inputProof } = await input.encrypt();
-  console.log('[FHE] Encryption complete - Handles:', handles, 'Proof length:', inputProof?.length);
-
-  const result = ensureHexPayload(handles, inputProof);
-  console.log('[FHE] Final result:', { handleLength: result.handle.length, proofLength: result.proof.length });
-  return result;
+  const result = await encryptAmount(value, contractAddress, userAddress, provider);
+  return {
+    handle: result.handle as `0x${string}`,
+    proof: result.proof as `0x${string}`,
+  };
 };
 
-export const encryptUint128 = async (
-  value: bigint,
+export const encryptTwoUint64 = async (
+  first: bigint,
+  second: bigint,
   contractAddress: string,
   userAddress: string,
   provider?: any
-): Promise<{ handle: `0x${string}`; proof: `0x${string}` }> => {
+): Promise<{ firstHandle: `0x${string}`; secondHandle: `0x${string}`; proof: `0x${string}` }> => {
   const fhe = await initializeFHE(provider);
+  const checksumAddress = getAddress(contractAddress);
 
-  const checksumContract = getAddress(contractAddress);
-  const checksumUser = getAddress(userAddress);
-
-  const input = fhe.createEncryptedInput(checksumContract, checksumUser);
-  input.add128(value);
+  const input = fhe.createEncryptedInput(checksumAddress, userAddress);
+  input.add64(first);
+  input.add64(second);
 
   const { handles, inputProof } = await input.encrypt();
 
-  return ensureHexPayload(handles, inputProof);
+  return {
+    firstHandle: normalizeBytes32(handles[0]),
+    secondHandle: normalizeBytes32(handles[1]),
+    proof: hexlify(inputProof) as `0x${string}`,
+  };
 };
+const normalizeBytes32 = (bytes: Uint8Array): `0x${string}` => {
+  if (bytes.length === 32) {
+    return hexlify(bytes) as `0x${string}`;
+  }
 
-function ensureHexPayload(
-  handles: string | string[],
-  inputProof: string
-): { handle: `0x${string}`; proof: `0x${string}` } {
-  const handleArray = Array.isArray(handles) ? handles : [handles];
-  const firstHandle = handleArray[0];
+  const normalized = new Uint8Array(32);
+  if (bytes.length >= 32) {
+    normalized.set(bytes.slice(0, 32));
+  } else {
+    normalized.set(bytes);
+  }
 
-  const handle = (firstHandle.startsWith('0x') ? firstHandle : `0x${firstHandle}`) as `0x${string}`;
-  const proof = (inputProof.startsWith('0x') ? inputProof : `0x${inputProof}`) as `0x${string}`;
-
-  return { handle, proof };
-}
-
-export async function getFHEInstance(provider?: any): Promise<any> {
-  return initializeFHE(provider);
-}
+  return hexlify(normalized) as `0x${string}`;
+};

@@ -27,31 +27,121 @@ const MintCard = () => {
   const { balance: token1Balance, refetch: refetchToken1 } = useTokenBalance(token1Address, address);
 
   // Mint hooks
-  const { mint: mintToken0, isPending: isPending0, isSuccess: isSuccess0, error: error0 } = useMintToken(token0Address);
-  const { mint: mintToken1, isPending: isPending1, isSuccess: isSuccess1, error: error1 } = useMintToken(token1Address);
+  const { mint: mintToken0, hash: hash0, isPending: isPending0, isConfirming: isConfirming0, isSuccess: isSuccess0, error: error0 } = useMintToken(token0Address);
+  const { mint: mintToken1, hash: hash1, isPending: isPending1, isConfirming: isConfirming1, isSuccess: isSuccess1, error: error1 } = useMintToken(token1Address);
 
+  // Monitor transaction submission
+  useEffect(() => {
+    if (isPending0 || isPending1) {
+      const token = isPending0 ? "LUSD" : "LETH";
+      toast.info(`${token} mint transaction submitted. Waiting for confirmation...`);
+    }
+  }, [isPending0, isPending1]);
+
+  // Monitor transaction confirmation
+  useEffect(() => {
+    if (isConfirming0 || isConfirming1) {
+      const hash = isConfirming0 ? hash0 : hash1;
+      const token = isConfirming0 ? "LUSD" : "LETH";
+
+      toast.loading(
+        <div>
+          <p className="font-semibold">Confirming {token} mint transaction...</p>
+          {hash && (
+            <a
+              href={`https://sepolia.etherscan.io/tx/${hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:text-blue-600 text-xs underline mt-1 block"
+            >
+              View on Etherscan →
+            </a>
+          )}
+        </div>,
+        { id: `confirming-${hash}` }
+      );
+    }
+  }, [isConfirming0, isConfirming1, hash0, hash1]);
+
+  // Monitor transaction success
   useEffect(() => {
     if (isSuccess0 || isSuccess1) {
-      toast.success("Tokens minted successfully!");
+      const hash = isSuccess0 ? hash0 : hash1;
+      const token = isSuccess0 ? "LUSD" : "LETH";
+
+      // Dismiss loading toast
+      if (hash) toast.dismiss(`confirming-${hash}`);
+
+      toast.success(
+        <div>
+          <p className="font-semibold">✅ {token} minted successfully!</p>
+          {hash && (
+            <a
+              href={`https://sepolia.etherscan.io/tx/${hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:text-blue-600 text-xs underline mt-1 block"
+            >
+              View on Etherscan →
+            </a>
+          )}
+        </div>
+      );
+
       setIsMinting(false);
       refetchToken0();
       refetchToken1();
     }
-  }, [isSuccess0, isSuccess1]);
+  }, [isSuccess0, isSuccess1, hash0, hash1, refetchToken0, refetchToken1]);
 
+  // Monitor transaction errors
   useEffect(() => {
     if (error0) {
-      toast.error(`Mint failed: ${error0.message}`);
+      if (hash0) toast.dismiss(`confirming-${hash0}`);
+
+      toast.error(
+        <div>
+          <p className="font-semibold">❌ LUSD mint failed</p>
+          <p className="text-xs mt-1">{error0.message}</p>
+          {hash0 && (
+            <a
+              href={`https://sepolia.etherscan.io/tx/${hash0}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:text-blue-600 text-xs underline mt-1 block"
+            >
+              View on Etherscan →
+            </a>
+          )}
+        </div>
+      );
       setIsMinting(false);
     }
-  }, [error0]);
+  }, [error0, hash0]);
 
   useEffect(() => {
     if (error1) {
-      toast.error(`Mint failed: ${error1.message}`);
+      if (hash1) toast.dismiss(`confirming-${hash1}`);
+
+      toast.error(
+        <div>
+          <p className="font-semibold">❌ LETH mint failed</p>
+          <p className="text-xs mt-1">{error1.message}</p>
+          {hash1 && (
+            <a
+              href={`https://sepolia.etherscan.io/tx/${hash1}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:text-blue-600 text-xs underline mt-1 block"
+            >
+              View on Etherscan →
+            </a>
+          )}
+        </div>
+      );
       setIsMinting(false);
     }
-  }, [error1]);
+  }, [error1, hash1]);
 
   const handleMintToken0 = async () => {
     if (!address || !token0Amount || !token0Address) {
@@ -64,11 +154,16 @@ const MintCard = () => {
       setIsEncrypting(true);
       toast.info("Encrypting mint amount with FHE...");
 
-      const amountBigInt = parseUnits(token0Amount, 18);
+      const amountBigInt = parseUnits(token0Amount, 6);
+      const MAX_UINT64 = BigInt("18446744073709551615");
+      if (amountBigInt > MAX_UINT64) {
+        throw new Error("Amount too large. Maximum is 18,446,744,073 tokens");
+      }
+
       const { handle, proof } = await encryptUint64(amountBigInt, token0Address, address);
 
       setIsEncrypting(false);
-      toast.success("Encryption complete! Minting LUSD...");
+      toast.success("Encryption complete! Submitting mint transaction...");
 
       await mintToken0(address, handle, proof);
     } catch (err: any) {
@@ -90,11 +185,16 @@ const MintCard = () => {
       setIsEncrypting(true);
       toast.info("Encrypting mint amount with FHE...");
 
-      const amountBigInt = parseUnits(token1Amount, 18);
+      const amountBigInt = parseUnits(token1Amount, 6);
+      const MAX_UINT64 = BigInt("18446744073709551615");
+      if (amountBigInt > MAX_UINT64) {
+        throw new Error("Amount too large. Maximum is 18,446,744,073 tokens");
+      }
+
       const { handle, proof } = await encryptUint64(amountBigInt, token1Address, address);
 
       setIsEncrypting(false);
-      toast.success("Encryption complete! Minting LETH...");
+      toast.success("Encryption complete! Submitting mint transaction...");
 
       await mintToken1(address, handle, proof);
     } catch (err: any) {
@@ -121,7 +221,6 @@ const MintCard = () => {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Token0 (LUSD) */}
           <div className="space-y-3">
             <Label className="text-lg font-semibold">Liquid USD (LUSD)</Label>
             {token0Balance !== undefined && (
@@ -154,7 +253,6 @@ const MintCard = () => {
             </div>
           </div>
 
-          {/* Token1 (LETH) */}
           <div className="space-y-3">
             <Label className="text-lg font-semibold">Liquid ETH (LETH)</Label>
             {token1Balance !== undefined && (

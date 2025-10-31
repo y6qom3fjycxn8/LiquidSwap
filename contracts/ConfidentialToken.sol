@@ -2,13 +2,14 @@
 pragma solidity ^0.8.27;
 
 import {FHE, externalEuint64, euint64} from "@fhevm/solidity/lib/FHE.sol";
+import {SepoliaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import "./OZ-confidential-contracts-fork/ERC7984.sol";
 
 /**
  * @title ConfidentialToken
  * @dev Concrete implementation of ERC7984 confidential token with public minting capability for testing
  */
-contract ConfidentialToken is ERC7984 {
+contract ConfidentialToken is ERC7984, SepoliaConfig {
     constructor(
         string memory name_,
         string memory symbol_,
