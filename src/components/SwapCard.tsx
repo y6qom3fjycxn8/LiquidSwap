@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ArrowDownUp, Settings, Loader2 } from "lucide-react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
@@ -17,9 +17,10 @@ import {
   useApproveToken,
   useTokenAllowance,
   useHasLiquidity,
-} from "@/hooks/useCAMMPair";
+  useRequestSwapRefund,
+} from "@/hooks/useSwapPair";
 import { encryptTwoUint64 } from "@/lib/fhe";
-import { CAMM_PAIR_ADDRESS } from "@/config/contracts";
+import { SWAP_PAIR_ADDRESS } from "@/config/contracts";
 
 const SwapCard = () => {
   const { address, isConnected } = useAccount();
@@ -48,6 +49,14 @@ const SwapCard = () => {
   // Contract hooks
   const { swapTokens, hash, isPending, isConfirming, isSuccess, error } = useSwapTokens();
   const { approve, hash: approveHash, isPending: isApproving, isConfirming: isApprovingConfirm, isSuccess: isApproved, error: approveError } = useApproveToken();
+  const {
+    requestRefund: triggerSwapRefund,
+    hash: swapRefundHash,
+    isPending: _isSwapRefundPending,
+    isConfirming: isSwapRefundConfirming,
+    isSuccess: isSwapRefundSuccess,
+    error: swapRefundError,
+  } = useRequestSwapRefund();
 
   const fromToken = swapDirection === "0to1" ? token0Address : token1Address;
   const toToken = swapDirection === "0to1" ? token1Address : token0Address;
@@ -202,6 +211,95 @@ const SwapCard = () => {
     }
   }, [approveError, approveHash]);
 
+  useEffect(() => {
+    if (!pendingDecryption?.isPending) {
+      if (!isSwapping) {
+        autoRefundState.current = { started: false, requestId: null, executed: false };
+      }
+      return;
+    }
+
+    const operation = Number(pendingDecryption.operation);
+    if (operation !== 3) {
+      return;
+    }
+
+    if (!autoRefundState.current.started) {
+      return;
+    }
+
+    const requestId = pendingDecryption.requestID;
+    if (autoRefundState.current.requestId === null || autoRefundState.current.requestId !== requestId) {
+      autoRefundState.current.requestId = requestId;
+      autoRefundState.current.executed = false;
+    }
+
+    const timestamp = Number(pendingDecryption.timestamp);
+    const now = Math.floor(Date.now() / 1000);
+
+    if (
+      !autoRefundState.current.executed &&
+      timestamp > 0 &&
+      now - timestamp > AUTO_REFUND_DELAY_SECONDS
+    ) {
+      autoRefundState.current.executed = true;
+      toast.warning("Swap decryption timeout detected. Initiating automatic refund...");
+      try {
+        triggerSwapRefund(requestId);
+      } catch (err: any) {
+        console.error("Auto swap refund failed", err);
+        toast.error(err.message || "Swap refund could not be submitted");
+        autoRefundState.current.executed = false;
+      }
+    }
+  }, [pendingDecryption, triggerSwapRefund, isSwapping]);
+
+  useEffect(() => {
+    if (swapRefundError) {
+      toast.error(swapRefundError.message || "Automatic swap refund failed");
+      autoRefundState.current.executed = false;
+    }
+  }, [swapRefundError]);
+
+  useEffect(() => {
+    if (isSwapRefundConfirming && swapRefundHash) {
+      toast.loading(
+        <div>
+          <p className="font-semibold">Processing swap refund...</p>
+          <a
+            href={`https://sepolia.etherscan.io/tx/${swapRefundHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 hover:text-blue-600 text-xs underline mt-1 block"
+          >
+            View on Etherscan →
+          </a>
+        </div>,
+        { id: `confirming-swap-refund-${swapRefundHash}` }
+      );
+    }
+  }, [isSwapRefundConfirming, swapRefundHash]);
+
+  useEffect(() => {
+    if (isSwapRefundSuccess && swapRefundHash) {
+      toast.dismiss(`confirming-swap-refund-${swapRefundHash}`);
+      toast.success(
+        <div>
+          <p className="font-semibold">Swap refund completed</p>
+          <a
+            href={`https://sepolia.etherscan.io/tx/${swapRefundHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 hover:text-blue-600 text-xs underline mt-1 block"
+          >
+            View on Etherscan →
+          </a>
+        </div>
+      );
+      autoRefundState.current = { started: false, requestId: null, executed: false };
+    }
+  }, [isSwapRefundSuccess, swapRefundHash]);
+
   const handleSwapDirection = () => {
     setSwapDirection((prev) => (prev === "0to1" ? "1to0" : "0to1"));
     setFromAmount("");
@@ -210,6 +308,14 @@ const SwapCard = () => {
   const handleMaxClick = () => {
     toast.info("Confidential balances cannot be auto-filled. Please enter the amount manually.");
   };
+
+  const autoRefundState = useRef<{ started: boolean; requestId: bigint | null; executed: boolean }>({
+    started: false,
+    requestId: null,
+    executed: false,
+  });
+
+  const AUTO_REFUND_DELAY_SECONDS = 90;
 
   const needsAuthorization = () => {
     if (!fromToken) return false;
@@ -244,6 +350,7 @@ const SwapCard = () => {
     try {
       setIsSwapping(true);
       setIsEncrypting(true);
+      autoRefundState.current = { started: true, requestId: null, executed: false };
       toast.info("Encrypting swap amounts with FHE...");
 
       const fromAmountBigInt = parseUnits(fromAmount, 6);
@@ -262,7 +369,7 @@ const SwapCard = () => {
         const { firstHandle, secondHandle, proof: sharedProof } = await encryptTwoUint64(
           fromAmountBigInt,
           zeroAmount,
-          CAMM_PAIR_ADDRESS,
+          SWAP_PAIR_ADDRESS,
           address
         );
         encryptedAmount0 = firstHandle;
@@ -272,7 +379,7 @@ const SwapCard = () => {
         const { firstHandle, secondHandle, proof: sharedProof } = await encryptTwoUint64(
           zeroAmount,
           fromAmountBigInt,
-          CAMM_PAIR_ADDRESS,
+          SWAP_PAIR_ADDRESS,
           address
         );
         encryptedAmount0 = firstHandle;
@@ -292,6 +399,7 @@ const SwapCard = () => {
       toast.error(err.message || "Failed to swap tokens");
       setIsSwapping(false);
       setIsEncrypting(false);
+      autoRefundState.current.started = false;
     }
   };
 

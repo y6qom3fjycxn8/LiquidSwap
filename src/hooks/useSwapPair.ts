@@ -1,5 +1,5 @@
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { CAMM_PAIR_ADDRESS, CAMM_PAIR_ABI, TOKEN0_ADDRESS, TOKEN1_ADDRESS, ERC7984_ABI } from '@/config/contracts';
+import { SWAP_PAIR_ADDRESS, SWAP_PAIR_ABI, TOKEN0_ADDRESS, TOKEN1_ADDRESS, ERC7984_ABI } from '@/config/contracts';
 
 export interface PendingDecryption {
   requestID: bigint;
@@ -11,8 +11,8 @@ export interface PendingDecryption {
 // Hook to get token0 address
 export function useToken0Address() {
   const { data, isLoading, error } = useReadContract({
-    address: CAMM_PAIR_ADDRESS,
-    abi: CAMM_PAIR_ABI,
+    address: SWAP_PAIR_ADDRESS,
+    abi: SWAP_PAIR_ABI,
     functionName: 'token0Address',
   });
 
@@ -26,8 +26,8 @@ export function useToken0Address() {
 // Hook to get token1 address
 export function useToken1Address() {
   const { data, isLoading, error } = useReadContract({
-    address: CAMM_PAIR_ADDRESS,
-    abi: CAMM_PAIR_ABI,
+    address: SWAP_PAIR_ADDRESS,
+    abi: SWAP_PAIR_ABI,
     functionName: 'token1Address',
   });
 
@@ -41,8 +41,8 @@ export function useToken1Address() {
 // Hook to get LP token balance
 export function useLPBalance(userAddress?: `0x${string}`) {
   const { data, isLoading, error, refetch } = useReadContract({
-    address: CAMM_PAIR_ADDRESS,
-    abi: CAMM_PAIR_ABI,
+    address: SWAP_PAIR_ADDRESS,
+    abi: SWAP_PAIR_ABI,
     functionName: 'balanceOf',
     args: userAddress ? [userAddress] : undefined,
   });
@@ -58,8 +58,8 @@ export function useLPBalance(userAddress?: `0x${string}`) {
 // Hook to get total LP supply
 export function useTotalSupply() {
   const { data, isLoading, error, refetch } = useReadContract({
-    address: CAMM_PAIR_ADDRESS,
-    abi: CAMM_PAIR_ABI,
+    address: SWAP_PAIR_ADDRESS,
+    abi: SWAP_PAIR_ABI,
     functionName: 'totalSupply',
   });
 
@@ -74,8 +74,8 @@ export function useTotalSupply() {
 // Hook to get pending decryption info
 export function usePendingDecryptionInfo() {
   const { data, isLoading, error, refetch } = useReadContract({
-    address: CAMM_PAIR_ADDRESS,
-    abi: CAMM_PAIR_ABI,
+    address: SWAP_PAIR_ADDRESS,
+    abi: SWAP_PAIR_ABI,
     functionName: 'getPendingDecryptionInfo',
   });
 
@@ -119,7 +119,7 @@ export function useTokenAllowance(tokenAddress?: `0x${string}`, ownerAddress?: `
     address: tokenAddress,
     abi: ERC7984_ABI,
     functionName: 'isOperator',
-    args: tokenAddress && ownerAddress ? [ownerAddress, CAMM_PAIR_ADDRESS] : undefined,
+    args: tokenAddress && ownerAddress ? [ownerAddress, SWAP_PAIR_ADDRESS] : undefined,
   });
 
   return {
@@ -140,7 +140,7 @@ export function useApproveToken() {
       address: tokenAddress,
       abi: ERC7984_ABI,
       functionName: 'setOperator',
-      args: [CAMM_PAIR_ADDRESS, BigInt(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60)],
+      args: [SWAP_PAIR_ADDRESS, BigInt(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60)],
     });
   };
 
@@ -157,8 +157,8 @@ export function useApproveToken() {
 // Hook to check if pool already holds liquidity
 export function useHasLiquidity() {
   const { data, isLoading, error, refetch } = useReadContract({
-    address: CAMM_PAIR_ADDRESS,
-    abi: CAMM_PAIR_ABI,
+    address: SWAP_PAIR_ADDRESS,
+    abi: SWAP_PAIR_ABI,
     functionName: 'hasLiquidity',
   });
 
@@ -182,8 +182,8 @@ export function useAddLiquidity() {
     inputProof: `0x${string}`
   ) => {
     writeContract({
-      address: CAMM_PAIR_ADDRESS,
-      abi: CAMM_PAIR_ABI,
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
       functionName: 'addLiquidity',
       args: [encryptedAmount0, encryptedAmount1, deadline, inputProof],
     });
@@ -211,8 +211,8 @@ export function useRemoveLiquidity() {
     deadline: bigint
   ) => {
     writeContract({
-      address: CAMM_PAIR_ADDRESS,
-      abi: CAMM_PAIR_ABI,
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
       functionName: 'removeLiquidity',
       args: [encryptedLPAmount, to, deadline, inputProof],
     });
@@ -241,8 +241,8 @@ export function useSwapTokens() {
     deadline: bigint
   ) => {
     writeContract({
-      address: CAMM_PAIR_ADDRESS,
-      abi: CAMM_PAIR_ABI,
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
       functionName: 'swapTokens',
       args: [encryptedAmount0In, encryptedAmount1In, to, deadline, inputProof],
     });
@@ -265,8 +265,8 @@ export function useRequestLiquidityAddingRefund() {
 
   const requestRefund = async (requestID: bigint) => {
     writeContract({
-      address: CAMM_PAIR_ADDRESS,
-      abi: CAMM_PAIR_ABI,
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
       functionName: 'requestLiquidityAddingRefund',
       args: [requestID],
     });
@@ -289,8 +289,8 @@ export function useRequestSwapRefund() {
 
   const requestRefund = async (requestID: bigint) => {
     writeContract({
-      address: CAMM_PAIR_ADDRESS,
-      abi: CAMM_PAIR_ABI,
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
       functionName: 'requestSwapRefund',
       args: [requestID],
     });
@@ -313,8 +313,8 @@ export function useRequestLiquidityRemovalRefund() {
 
   const requestRefund = async (requestID: bigint) => {
     writeContract({
-      address: CAMM_PAIR_ADDRESS,
-      abi: CAMM_PAIR_ABI,
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
       functionName: 'requestLiquidityRemovalRefund',
       args: [requestID],
     });

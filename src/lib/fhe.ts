@@ -248,7 +248,7 @@ export const encryptTwoUint64 = async (
     proof: hexlify(inputProof) as `0x${string}`,
   };
 };
-const normalizeBytes32 = (bytes: Uint8Array): `0x${string}` => {
+export const normalizeBytes32 = (bytes: Uint8Array): `0x${string}` => {
   if (bytes.length === 32) {
     return hexlify(bytes) as `0x${string}`;
   }

@@ -1,16 +1,16 @@
 import { sepolia } from 'wagmi/chains';
 
 // Swap Pair Contract Address on Sepolia
-export const CAMM_PAIR_ADDRESS = '0x6dFD65dC099C04362E19bB1dE60D63D3158a6844' as const;
+export const SWAP_PAIR_ADDRESS = '0xc68abF4A812060b587Cd9CC9Bba6a9e2D1df00e0' as const;
 
 // Token addresses (LUSD/LETH)
-export const TOKEN0_ADDRESS = '0xA87F4bAE7F4E267D64fFC222377B9acA9bf98e41' as const;
-export const TOKEN1_ADDRESS = '0xfE25b303ea656F8a692ab85B7484A1b94A8249De' as const;
+export const TOKEN0_ADDRESS = '0x534df81296D12C971a6BF8BfA609eD744e2610A3' as const;
+export const TOKEN1_ADDRESS = '0xf678ca1012Cf4AD86F4FD2BbBfc25a34F915b3fA' as const;
 
 export const CHAIN_ID = sepolia.id;
 
-// CAMMPair ABI - Core functions for liquidity and swapping
-export const CAMM_PAIR_ABI = [
+// Swap Pair ABI - Core functions for liquidity and swapping
+export const SWAP_PAIR_ABI = [
   // Read functions
   {
     inputs: [],

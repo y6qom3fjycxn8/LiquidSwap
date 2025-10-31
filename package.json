@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "compile": "hardhat --config hardhat.config.cjs compile",
     "deploy": "hardhat --config hardhat.config.cjs run scripts/deploy.cjs --network sepolia",
-    "mint": "hardhat --config hardhat.config.cjs run scripts/mint-tokens.cjs --network sepolia"
+    "mint": "hardhat --config hardhat.config.cjs run scripts/mint-tokens.cjs --network sepolia",
+    "test": "vitest"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -87,6 +88,10 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
-    "vite": "^5.4.19"
+    "vite": "^5.4.19",
+    "vitest": "^1.6.0",
+    "@testing-library/react": "^14.0.0",
+    "@testing-library/jest-dom": "^6.4.8",
+    "jsdom": "^23.0.0"
   }
 }

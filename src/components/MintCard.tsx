@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { parseUnits } from "viem";
-import { useMintToken, useTokenBalance, useToken0Address, useToken1Address } from "@/hooks/useCAMMPair";
+import { useMintToken, useTokenBalance, useToken0Address, useToken1Address } from "@/hooks/useSwapPair";
 import { encryptUint64 } from "@/lib/fhe";
 
 const MintCard = () => {

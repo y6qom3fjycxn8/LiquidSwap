@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plus, Loader2 } from "lucide-react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
@@ -16,9 +16,11 @@ import {
   usePendingDecryptionInfo,
   useApproveToken,
   useTokenAllowance,
-} from "@/hooks/useCAMMPair";
+  useHasLiquidity,
+  useRequestLiquidityAddingRefund,
+} from "@/hooks/useSwapPair";
 import { encryptTwoUint64 } from "@/lib/fhe";
-import { CAMM_PAIR_ADDRESS } from "@/config/contracts";
+import { SWAP_PAIR_ADDRESS } from "@/config/contracts";
 
 const AddLiquidityCard = () => {
   const { address, isConnected } = useAccount();
@@ -41,9 +43,18 @@ const AddLiquidityCard = () => {
 
   // Get pending decryption status
   const { pendingDecryption, refetch: refetchPending } = usePendingDecryptionInfo();
+  const { refetch: refetchHasLiquidity } = useHasLiquidity();
 
   // Contract hooks
   const { addLiquidity, hash, isPending, isConfirming, isSuccess, error } = useAddLiquidity();
+  const {
+    requestRefund: triggerLiquidityRefund,
+    hash: refundHash,
+    isPending: _isRefundPending,
+    isConfirming: isRefundConfirming,
+    isSuccess: isRefundSuccess,
+    error: refundError,
+  } = useRequestLiquidityAddingRefund();
   const {
     approve,
     hash: approveHash,
@@ -105,8 +116,9 @@ const AddLiquidityCard = () => {
       refetchToken0();
       refetchToken1();
       refetchPending();
+      refetchHasLiquidity();
     }
-  }, [isSuccess, hash, refetchToken0, refetchToken1, refetchPending]);
+  }, [isSuccess, hash, refetchToken0, refetchToken1, refetchPending, refetchHasLiquidity]);
 
   // Monitor transaction errors
   useEffect(() => {
@@ -132,6 +144,96 @@ const AddLiquidityCard = () => {
       setIsAdding(false);
     }
   }, [error, hash]);
+
+  useEffect(() => {
+    if (refundError) {
+      toast.error(refundError.message || "Automatic refund failed");
+      autoRefundState.current.executed = false;
+    }
+  }, [refundError]);
+
+  useEffect(() => {
+    if (isRefundConfirming && refundHash) {
+      toast.loading(
+        <div>
+          <p className="font-semibold">Processing refund...</p>
+          <a
+            href={`https://sepolia.etherscan.io/tx/${refundHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 hover:text-blue-600 text-xs underline mt-1 block"
+          >
+            View on Etherscan →
+          </a>
+        </div>,
+        { id: `confirming-refund-${refundHash}` }
+      );
+    }
+  }, [isRefundConfirming, refundHash]);
+
+  useEffect(() => {
+    if (isRefundSuccess && refundHash) {
+      toast.dismiss(`confirming-refund-${refundHash}`);
+      toast.success(
+        <div>
+          <p className="font-semibold">Refund completed</p>
+          <a
+            href={`https://sepolia.etherscan.io/tx/${refundHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 hover:text-blue-600 text-xs underline mt-1 block"
+          >
+            View on Etherscan →
+          </a>
+        </div>
+      );
+      autoRefundState.current = { started: false, requestId: null, executed: false };
+      refetchHasLiquidity();
+    }
+  }, [isRefundSuccess, refundHash, refetchHasLiquidity]);
+
+  useEffect(() => {
+    if (!pendingDecryption?.isPending) {
+      if (!isAdding) {
+        autoRefundState.current = { started: false, requestId: null, executed: false };
+      }
+      return;
+    }
+
+    const operation = Number(pendingDecryption.operation);
+    if (operation !== 1) {
+      return;
+    }
+
+    if (!autoRefundState.current.started) {
+      return;
+    }
+
+    const requestId = pendingDecryption.requestID;
+    if (autoRefundState.current.requestId === null || autoRefundState.current.requestId !== requestId) {
+      autoRefundState.current.requestId = requestId;
+      autoRefundState.current.executed = false;
+    }
+
+    const timestamp = Number(pendingDecryption.timestamp);
+    const now = Math.floor(Date.now() / 1000);
+
+    if (
+      !autoRefundState.current.executed &&
+      timestamp > 0 &&
+      now - timestamp > AUTO_REFUND_DELAY_SECONDS
+    ) {
+      autoRefundState.current.executed = true;
+      toast.warning("Decryption timeout detected. Initiating automatic refund...");
+      try {
+        triggerLiquidityRefund(requestId);
+      } catch (err: any) {
+        console.error("Auto refund failed", err);
+        toast.error(err.message || "Auto refund could not be submitted");
+        autoRefundState.current.executed = false;
+      }
+    }
+  }, [pendingDecryption, triggerLiquidityRefund, isAdding]);
 
   // Monitor approval transaction confirmation
   useEffect(() => {
@@ -201,6 +303,14 @@ const AddLiquidityCard = () => {
     }
   }, [approveError, approveHash]);
 
+  const autoRefundState = useRef<{ started: boolean; requestId: bigint | null; executed: boolean }>({
+    started: false,
+    requestId: null,
+    executed: false,
+  });
+
+  const AUTO_REFUND_DELAY_SECONDS = 90;
+
   const handleMaxClick = (tokenNumber: 0 | 1) => {
     const tokenLabel = tokenNumber === 0 ? "LUSD" : "LETH";
     toast.info(`Balances are encrypted. Please enter your ${tokenLabel} amount manually.`);
@@ -239,6 +349,7 @@ const AddLiquidityCard = () => {
     try {
       setIsAdding(true);
       setIsEncrypting(true);
+      autoRefundState.current = { started: true, requestId: null, executed: false };
       toast.info("Encrypting token amounts with FHE...");
 
       const amount0BigInt = parseUnits(token0Amount, 6);
@@ -253,7 +364,7 @@ const AddLiquidityCard = () => {
       const { firstHandle: handle0, secondHandle: handle1, proof } = await encryptTwoUint64(
         amount0BigInt,
         amount1BigInt,
-        CAMM_PAIR_ADDRESS,
+        SWAP_PAIR_ADDRESS,
         address
       );
 
@@ -268,6 +379,7 @@ const AddLiquidityCard = () => {
       toast.error(err.message || "Failed to add liquidity");
       setIsAdding(false);
       setIsEncrypting(false);
+      autoRefundState.current.started = false;
     }
   };
 
@@ -429,7 +541,7 @@ const AddLiquidityCard = () => {
         </div>
       )}
     </Card>
-  );
+);
 };
 
 export default AddLiquidityCard;
