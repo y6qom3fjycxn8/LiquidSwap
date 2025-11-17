@@ -1,48 +1,55 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
+// Updated for fhEVM 0.9.1 - Self-relaying decryption pattern with Queue Mode
 
 pragma solidity ^0.8.27;
 
 import {FHE, externalEuint64, ebool, euint16, euint32, euint64, euint128} from "@fhevm/solidity/lib/FHE.sol";
-import {SepoliaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
+import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {ERC7984} from "./OZ-confidential-contracts-fork/ERC7984.sol";
 import {IERC7984} from "./OZ-confidential-contracts-fork/IERC7984.sol";
 import {SwapLib} from "./SwapLib.sol";
 
 /**
- * To beat (Dangerously close to size limit): 
-·------------------------|--------------------------------|--------------------------------·
- |  Solc version: 0.8.27  ·  Optimizer enabled: true       ·  Runs: 50                      │
- ·························|································|·································
- |  Contract Name         ·  Deployed size (KiB) (change)  ·  Initcode size (KiB) (change)  │
- ·························|································|·································
- |  CAMMFactory           ·                23.699 (0.000)  ·                23.725 (0.000)  │
- ·························|································|·································
- |  CAMMPair              ·                20.855 (0.000)  ·                22.729 (0.000)  │
- ·························|································|·································
- |  SwapLib           ·                 5.082 (0.000)  ·                 5.113 (0.000)  │
- ·------------------------|--------------------------------|--------------------------------·
+ * @title LiquidSwapPair
+ * @dev Confidential Swap Pair - fhEVM 0.9.1 version with Queue Mode.
+ *      This contract implements liquidity provision, token swapping using confidential computations.
+ *      Updated to use self-relaying decryption pattern (no Oracle callbacks).
+ *
+ *      QUEUE MODE: Multiple users can have pending operations simultaneously.
+ *      Each user can have one pending operation at a time, but different users
+ *      don't block each other. Operations are processed when callbacks are submitted.
+ *
+ * @notice In fhEVM 0.9.1, decryption works as follows:
+ *         1. Contract marks values as publicly decryptable via FHE.makePubliclyDecryptable()
+ *         2. Client uses relayer SDK to decrypt off-chain
+ *         3. Client submits decrypted values + proof back to contract
+ *         4. Contract verifies with FHE.checkSignatures()
  */
-/**
- * @title CAMMPair
- * @dev Confidential Automated Market Maker Pair.
- *      This contract implements liquidity provision, token swapping, and batch settlement using confidential computations.
- *      Inspired by UniswapV2 : https://docs.uniswap.org/contracts/v2/overview
- */
-contract CAMMPair is ERC7984, SepoliaConfig {
+contract LiquidSwapPair is ERC7984, ZamaEthereumConfig {
     // Structs
     struct addLiqDecBundleStruct {
         euint64 _sentAmount0;
         euint64 _sentAmount1;
         euint128 _partialupperPart0;
         euint128 _partialupperPart1;
+        euint128 _divLowerPart0;
+        euint128 _divLowerPart1;
+        euint128 _obfuscatedReserve0;
+        euint128 _obfuscatedReserve1;
         address _user;
+        uint256 timestamp;
+        bool active;
     }
     struct removeLiqDecBundleStruct {
         euint64 _lpSent;
         euint128 _upperPart0;
         euint128 _upperPart1;
+        euint128 _divLowerPart0;
+        euint128 _divLowerPart1;
         address _from;
         address _to;
+        uint256 timestamp;
+        bool active;
     }
     struct obfuscatedReservesStruct {
         euint128 obfuscatedReserve0;
@@ -51,10 +58,14 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     struct swapDecBundleStruct {
         euint128 divUpperPart0;
         euint128 divUpperPart1;
+        euint128 divLowerPart0;
+        euint128 divLowerPart1;
         euint64 amount0In;
         euint64 amount1In;
         address from;
         address to;
+        uint256 timestamp;
+        bool active;
     }
     struct swapOutputStruct {
         euint64 amount0Out;
@@ -66,12 +77,15 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         RemoveLiquidity,
         Swap
     }
-    struct pendingDecryptionStruct {
-        uint256 currentRequestID;
-        bool isPendingDecryption;
-        uint256 decryptionTimestamp;
+
+    // Per-user pending operation tracking (Queue Mode)
+    struct userPendingOperationStruct {
+        uint256 requestID;
         Operation operation;
+        uint256 timestamp;
+        bool hasPending;
     }
+
     struct standardRefundStruct {
         euint64 amount0;
         euint64 amount1;
@@ -88,10 +102,16 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     mapping(address from => mapping(uint256 requestID => standardRefundStruct)) public standardRefund;
     mapping(address from => mapping(uint256 requestID => liquidityRemovalRefundStruct)) public liquidityRemovalRefund;
 
+    // Per-user pending operation (Queue Mode)
+    mapping(address user => userPendingOperationStruct) public userPendingOperation;
+
+    // Request ID counter
+    uint256 private requestIDCounter;
+
     // Events
     event liquidityMinted(uint256 blockNumber, address user);
     event liquidityBurnt(uint256 blockNumber, address user);
-    event decryptionRequested(address from, uint256 blockNumber, uint256 requestID);
+    event DecryptionPending(address indexed from, uint256 indexed requestID, Operation operation, bytes32[] handles);
     event Swap(address from, euint64 amount0In, euint64 amount1In, euint64 amount0Out, euint64 amount1Out, address to);
     event Refund(address from, uint256 blockNumber, uint256 requestID);
     event discloseReservesInfo(
@@ -105,7 +125,7 @@ contract CAMMPair is ERC7984, SepoliaConfig {
 
     // Errors
     error Expired();
-    error PendingDecryption(uint256 until);
+    error UserHasPendingOperation(address user, uint256 requestID, uint256 until);
     error Forbidden();
     error WrongRequestID();
     error NoRefund();
@@ -114,18 +134,21 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     error InvalidTokens();
     error UnexpectedOperation();
     error InvalidCleartext();
+    error RequestNotActive();
+    error NotRequestOwner();
+    error OperationNotExpired();
 
     // Variables
     // Predefined constants and initial values
     euint64 private immutable ZERO;
     uint64 public immutable scalingFactor;
     uint64 public immutable MINIMUM_LIQUIDITY;
-    uint256 private constant MAX_DECRYPTION_TIME = 5 minutes;
+    uint256 private constant MAX_OPERATION_TIME = 5 minutes;
     bool private minLiquidityLocked = false;
 
     // Addresses of the factory and associated tokens
     address public factory;
-    address public cammPriceScanner;
+    address public priceScanner;
     address public token0Address;
     address public token1Address;
     IERC7984 private token0;
@@ -136,7 +159,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     euint64 private reserve1;
 
     obfuscatedReservesStruct public obfuscatedReserves;
-    pendingDecryptionStruct private pendingDecryption;
     address[] private reserveViewerList;
     mapping(address => bool) private _reserveViewer;
 
@@ -144,9 +166,9 @@ contract CAMMPair is ERC7984, SepoliaConfig {
      * @dev Constructor for the pair contract.
      * Sets the factory address and initializes the token.
      */
-    constructor(address _cammPriceScanner) ERC7984("Liquidity Token", "PAIR", "") {
+    constructor(address _priceScanner) ERC7984("Liquidity Token", "PAIR", "") {
         factory = msg.sender;
-        cammPriceScanner = _cammPriceScanner;
+        priceScanner = _priceScanner;
 
         ZERO = FHE.asEuint64(0);
 
@@ -159,8 +181,8 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         FHE.allowThis(reserve0);
         FHE.allowThis(reserve1);
 
-        if (_cammPriceScanner != address(0)) {
-            _registerReserveViewer(_cammPriceScanner);
+        if (_priceScanner != address(0)) {
+            _registerReserveViewer(_priceScanner);
         }
 
         _updateObfuscatedReserves();
@@ -184,17 +206,17 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     }
 
     /**
-     * @dev Modifier to ensure that pool is not in the middle of a decryption process.
+     * @dev Modifier to ensure user doesn't have a pending operation (Queue Mode).
+     *      Each user can only have one pending operation at a time.
+     *      Different users can operate simultaneously.
      */
-    modifier decryptionAvailable() {
-        // Here we make sure there are no pending decryption.
-        // In some cases the decryption request is sent but is never fulfilled.
-        // In such cases we make sure the last decryption request was more than 5 minutes ago, to not block indefinitly the pair.
+    modifier userOperationAvailable() {
+        userPendingOperationStruct memory pending = userPendingOperation[msg.sender];
         if (
-            pendingDecryption.isPendingDecryption &&
-            block.timestamp < pendingDecryption.decryptionTimestamp + MAX_DECRYPTION_TIME
+            pending.hasPending &&
+            block.timestamp < pending.timestamp + MAX_OPERATION_TIME
         ) {
-            revert PendingDecryption(pendingDecryption.decryptionTimestamp + MAX_DECRYPTION_TIME);
+            revert UserHasPendingOperation(msg.sender, pending.requestID, pending.timestamp + MAX_OPERATION_TIME);
         }
         _;
     }
@@ -221,12 +243,12 @@ contract CAMMPair is ERC7984, SepoliaConfig {
      */
     function setPriceScanner(address newScanner) external onlyFactory {
         if (newScanner == address(0)) revert InvalidAddress();
-        address previous = cammPriceScanner;
+        address previous = priceScanner;
         if (previous == newScanner) {
             return;
         }
 
-        cammPriceScanner = newScanner;
+        priceScanner = newScanner;
         _registerReserveViewer(newScanner);
 
         emit PriceScannerUpdated(previous, newScanner);
@@ -272,15 +294,28 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     }
 
     /**
-     * @dev Exposes the current pending decryption metadata for front-end monitoring.
+     * @dev Exposes the pending operation for a specific user (Queue Mode).
+     * @param user The address to check
      */
-    function getPendingDecryptionInfo()
+    function getUserPendingOperationInfo(address user)
+        external
+        view
+        returns (uint256 requestID, bool hasPending, uint256 timestamp, Operation operation)
+    {
+        userPendingOperationStruct memory info = userPendingOperation[user];
+        return (info.requestID, info.hasPending, info.timestamp, info.operation);
+    }
+
+    /**
+     * @dev Legacy function for backward compatibility - returns caller's pending operation.
+     */
+    function getPendingOperationInfo()
         external
         view
         returns (uint256 requestID, bool isPending, uint256 timestamp, Operation operation)
     {
-        pendingDecryptionStruct memory info = pendingDecryption;
-        return (info.currentRequestID, info.isPendingDecryption, info.decryptionTimestamp, info.operation);
+        userPendingOperationStruct memory info = userPendingOperation[msg.sender];
+        return (info.requestID, info.hasPending, info.timestamp, info.operation);
     }
 
     /**
@@ -350,12 +385,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
 
     /**
      * @dev Transfers tokens from a user to the pool and updates reserves.
-     * @param from The address from which tokens are transferred.
-     * @param amount0In The amount of token0 to transfer.
-     * @param amount1In The amount of token1 to transfer.
-     * @param updateReserves Bool flag to incorporate or not the transfered amount in the pool.
-     * @return sentAmount0 The actual amount of token0 received by the pool.
-     * @return sentAmount1 The actual amount of token1 received by the pool.
      */
     function _transferTokensToPool(
         address from,
@@ -366,14 +395,14 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         euint64 balance0Before = token0.confidentialBalanceOf(address(this));
         euint64 balance1Before = token1.confidentialBalanceOf(address(this));
 
-        token0.confidentialTransferFrom(from, address(this), amount0In); // 293_000 HCU
-        token1.confidentialTransferFrom(from, address(this), amount1In); // 293_000 HCU
+        token0.confidentialTransferFrom(from, address(this), amount0In);
+        token1.confidentialTransferFrom(from, address(this), amount1In);
 
         euint64 balance0After = token0.confidentialBalanceOf(address(this));
         euint64 balance1After = token1.confidentialBalanceOf(address(this));
 
-        sentAmount0 = FHE.sub(balance0After, balance0Before); // 129_000 HCU
-        sentAmount1 = FHE.sub(balance1After, balance1Before); // 129_000 HCU
+        sentAmount0 = FHE.sub(balance0After, balance0Before);
+        sentAmount1 = FHE.sub(balance1After, balance1Before);
 
         if (updateReserves) {
             _updateReserves(FHE.add(reserve0, sentAmount0), FHE.add(reserve1, sentAmount1));
@@ -382,10 +411,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
 
     /**
      * @dev Transfers tokens from the pool to a user.
-     * @param to The recipient address.
-     * @param amount0Out The amount of token0 to send.
-     * @param amount1Out The amount of token1 to send.
-     * @param updateReserves Flag indicating whether to update the reserves after transfer.
      */
     function _transferTokensFromPool(address to, euint64 amount0Out, euint64 amount1Out, bool updateReserves) internal {
         euint64 balance0Before = token0.confidentialBalanceOf(address(this));
@@ -410,9 +435,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
 
     /**
      * @dev Transfers liquidity tokens from a user to the pool.
-     * @param from The address from which liquidity tokens are transferred.
-     * @param LPAmount The amount of liquidity tokens to transfer.
-     * @return sentAmount The actual amount of liquidity tokens transferred.
      */
     function _transferLPToPool(address from, euint64 LPAmount) internal returns (euint64 sentAmount) {
         euint64 balanceBefore = confidentialBalanceOf(address(this));
@@ -424,9 +446,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
 
     /**
      * @dev Mints liquidity tokens for the user.
-     *      If this is the first liquidity addition, enforces the minimum liquidity constraint.
-     * @param liquidityAmount The amount of liquidity tokens to mint.
-     * @param user The address to receive the minted liquidity tokens.
      */
     function _mintLP(euint64 liquidityAmount, address user) internal {
         if (!minLiquidityLocked) {
@@ -442,10 +461,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
 
     /**
      * @dev Handles the initial liquidity mint ensuring minimum liquidity constraints.
-     *      Refunds tokens to the user if the provided amounts are below the minimum liquidity.
-     * @param to The address to receive liquidity tokens.
-     * @param amount0 The amount of token0 provided.
-     * @param amount1 The amount of token1 provided.
      */
     function _firstMint(address to, euint64 amount0, euint64 amount1) internal {
         (euint64 liquidityAmount, euint64 amount0Back, euint64 amount1Back) = SwapLib.computeFirstMint(
@@ -457,36 +472,52 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         FHE.allowTransient(amount0Back, token0Address);
         FHE.allowTransient(amount1Back, token1Address);
 
-        token0.confidentialTransfer(msg.sender, amount0Back); // refund first liquidity if it is below the minimal amount
-        token1.confidentialTransfer(msg.sender, amount1Back); // refund first liquidity if it is below the minimal amount
+        token0.confidentialTransfer(msg.sender, amount0Back);
+        token1.confidentialTransfer(msg.sender, amount1Back);
 
         _mintLP(liquidityAmount, to);
     }
 
     /**
+     * @dev Generate next request ID
+     */
+    function _getNextRequestID() internal returns (uint256) {
+        return ++requestIDCounter;
+    }
+
+    /**
+     * @dev Set user's pending operation (Queue Mode)
+     */
+    function _setUserPendingOperation(address user, uint256 requestID, Operation operation) internal {
+        userPendingOperation[user] = userPendingOperationStruct({
+            requestID: requestID,
+            operation: operation,
+            timestamp: block.timestamp,
+            hasPending: true
+        });
+    }
+
+    /**
+     * @dev Clear user's pending operation (Queue Mode)
+     */
+    function _clearUserPendingOperation(address user) internal {
+        delete userPendingOperation[user];
+    }
+
+    // ========== ADD LIQUIDITY ==========
+
+    /**
      * @dev External function that manage liquidity adding.
      *      This function is called by another smart contract.
-     *      The important logic is in _addLiquidity().
-     * @param amount0 The amount of token0 added to the liquidity.
-     * @param amount1 The amount of token1 added to the liquidity.
-     * @param deadline Timestamp by which the liquidity adding must be completed.
      */
     function addLiquidity(euint64 amount0, euint64 amount1, uint256 deadline) external {
-        //Allow tokens to use the related amount variable
         FHE.allowTransient(amount0, token0Address);
         FHE.allowTransient(amount1, token1Address);
-
         _addLiquidity(amount0, amount1, msg.sender, deadline);
     }
 
     /**
-     * @dev External function that manage liquidity adding.
-     *      This function is called by a user (using a dApp).
-     *      The important logic is in _addLiquidity().
-     * @param encryptedAmount0 The encrypted amount of token0 added to the liquidity.
-     * @param encryptedAmount1 The encrypted amount of token1 added to the liquidity.
-     * @param deadline Timestamp by which the liquidity adding must be completed.
-     * @param inputProof Proof used to verify the validity of encrypted inputs.
+     * @dev External function that manage liquidity adding from dApp with encrypted inputs.
      */
     function addLiquidity(
         externalEuint64 encryptedAmount0,
@@ -497,7 +528,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         euint64 amount0 = FHE.fromExternal(encryptedAmount0, inputProof);
         euint64 amount1 = FHE.fromExternal(encryptedAmount1, inputProof);
 
-        //Allow tokens to use the related amount variable
         FHE.allowTransient(amount0, token0Address);
         FHE.allowTransient(amount1, token1Address);
 
@@ -505,25 +535,21 @@ contract CAMMPair is ERC7984, SepoliaConfig {
     }
 
     /**
-     * @dev Internal function that manage the computing of necessary variables for adding liquidity.
-     * @param amount0 The amount of token0 added to the liquidity.
-     * @param amount1 The amount of token1 added to the liquidity.
-     * @param from The address that adds liquidity.
-     * @param deadline Timestamp by which the liquidity computinh must be completed.
+     * @dev Internal function that manages liquidity addition.
+     *      In fhEVM 0.9.1, values are marked as publicly decryptable and client
+     *      must call addLiquidityCallback with decrypted values + proof.
      */
     function _addLiquidity(
         euint64 amount0,
         euint64 amount1,
         address from,
         uint256 deadline
-    ) internal ensure(deadline) decryptionAvailable {
+    ) internal ensure(deadline) userOperationAvailable {
         if (!minLiquidityLocked) {
-            //sending the tokens and adding them to pool
             (euint64 sentAmount0, euint64 sentAmount1) = _transferTokensToPool(from, amount0, amount1, true);
             _firstMint(from, sentAmount0, sentAmount1);
         } else {
-            //sending the tokens without adding them to pool
-            (euint64 sentAmount0, euint64 sentAmount1) = _transferTokensToPool(from, amount0, amount1, false); // 844_000 HCU
+            (euint64 sentAmount0, euint64 sentAmount1) = _transferTokensToPool(from, amount0, amount1, false);
             euint128 currentLPSupply = FHE.asEuint128(confidentialTotalSupply());
 
             (
@@ -533,29 +559,34 @@ contract CAMMPair is ERC7984, SepoliaConfig {
                 euint128 partialUpperPart1
             ) = SwapLib.computeAddLiquidity(reserve0, reserve1, currentLPSupply);
 
-            bytes32[] memory cts = new bytes32[](4);
-            cts[0] = FHE.toBytes32(divLowerPart0);
-            cts[1] = FHE.toBytes32(divLowerPart1);
-            cts[2] = FHE.toBytes32(obfuscatedReserves.obfuscatedReserve0);
-            cts[3] = FHE.toBytes32(obfuscatedReserves.obfuscatedReserve1);
+            uint256 requestID = _getNextRequestID();
 
-            uint256 requestID = FHE.requestDecryption(cts, this.addLiquidityCallback.selector);
-
+            // Store bundle for later callback
             addLiqDecBundle[requestID]._sentAmount0 = sentAmount0;
             addLiqDecBundle[requestID]._sentAmount1 = sentAmount1;
             addLiqDecBundle[requestID]._partialupperPart0 = partialUpperPart0;
             addLiqDecBundle[requestID]._partialupperPart1 = partialUpperPart1;
+            addLiqDecBundle[requestID]._divLowerPart0 = divLowerPart0;
+            addLiqDecBundle[requestID]._divLowerPart1 = divLowerPart1;
+            addLiqDecBundle[requestID]._obfuscatedReserve0 = obfuscatedReserves.obfuscatedReserve0;
+            addLiqDecBundle[requestID]._obfuscatedReserve1 = obfuscatedReserves.obfuscatedReserve1;
             addLiqDecBundle[requestID]._user = from;
+            addLiqDecBundle[requestID].timestamp = block.timestamp;
+            addLiqDecBundle[requestID].active = true;
 
             FHE.allowThis(addLiqDecBundle[requestID]._sentAmount0);
             FHE.allowThis(addLiqDecBundle[requestID]._sentAmount1);
             FHE.allowThis(addLiqDecBundle[requestID]._partialupperPart0);
             FHE.allowThis(addLiqDecBundle[requestID]._partialupperPart1);
 
-            pendingDecryption.currentRequestID = requestID;
-            pendingDecryption.decryptionTimestamp = block.timestamp;
-            pendingDecryption.isPendingDecryption = true;
-            pendingDecryption.operation = Operation.AddLiquidity;
+            // Mark values as publicly decryptable (fhEVM 0.9.1)
+            FHE.makePubliclyDecryptable(divLowerPart0);
+            FHE.makePubliclyDecryptable(divLowerPart1);
+            FHE.makePubliclyDecryptable(obfuscatedReserves.obfuscatedReserve0);
+            FHE.makePubliclyDecryptable(obfuscatedReserves.obfuscatedReserve1);
+
+            // Set user's pending operation (Queue Mode)
+            _setUserPendingOperation(from, requestID, Operation.AddLiquidity);
 
             standardRefund[from][requestID].amount0 = sentAmount0;
             standardRefund[from][requestID].amount1 = sentAmount1;
@@ -565,22 +596,40 @@ contract CAMMPair is ERC7984, SepoliaConfig {
             FHE.allow(standardRefund[from][requestID].amount0, from);
             FHE.allow(standardRefund[from][requestID].amount1, from);
 
-            emit decryptionRequested(from, block.number, requestID);
+            // Emit handles for client to decrypt
+            bytes32[] memory handles = new bytes32[](4);
+            handles[0] = FHE.toBytes32(divLowerPart0);
+            handles[1] = FHE.toBytes32(divLowerPart1);
+            handles[2] = FHE.toBytes32(obfuscatedReserves.obfuscatedReserve0);
+            handles[3] = FHE.toBytes32(obfuscatedReserves.obfuscatedReserve1);
+
+            emit DecryptionPending(from, requestID, Operation.AddLiquidity, handles);
         }
     }
 
     /**
-     * @dev Callback for an add-liquidity decryption request.
-     *      Verifies the request, reconstructs pricing targets from obfuscated reserves,
-     *      computes the LP mint amount, refunds any excess tokens, mints LP, and updates reserves.
-     * @param requestID Gateway request identifier expected to match the pending one.
-     * @param cleartexts Decrypted division lower parts and obfuscated reserves.
-     * @param decryptionProof Gateway signatures attesting the decryption result.
+     * @dev Callback for add-liquidity after client decrypts values off-chain.
+     *      Client must call this with decrypted values and proof from relayer SDK.
+     *      Anyone can submit the callback, not just the original user.
+     * @param requestID The request ID from DecryptionPending event
+     * @param cleartexts ABI-encoded decrypted values (divLowerPart0, divLowerPart1, obfRes0, obfRes1)
+     * @param decryptionProof Proof from relayer SDK
      */
-    function addLiquidityCallback(uint256 requestID, bytes memory cleartexts, bytes memory decryptionProof) external {
-        if (pendingDecryption.currentRequestID != requestID) revert WrongRequestID();
-        if (pendingDecryption.operation != Operation.AddLiquidity) revert UnexpectedOperation();
-        FHE.checkSignatures(requestID, cleartexts, decryptionProof);
+    function addLiquidityCallback(
+        uint256 requestID,
+        bytes memory cleartexts,
+        bytes memory decryptionProof
+    ) external {
+        if (!addLiqDecBundle[requestID].active) revert RequestNotActive();
+
+        // Verify decryption proof (fhEVM 0.9.1)
+        bytes32[] memory handles = new bytes32[](4);
+        handles[0] = FHE.toBytes32(addLiqDecBundle[requestID]._divLowerPart0);
+        handles[1] = FHE.toBytes32(addLiqDecBundle[requestID]._divLowerPart1);
+        handles[2] = FHE.toBytes32(addLiqDecBundle[requestID]._obfuscatedReserve0);
+        handles[3] = FHE.toBytes32(addLiqDecBundle[requestID]._obfuscatedReserve1);
+
+        FHE.checkSignatures(handles, cleartexts, decryptionProof);
 
         (uint128 divLowerPart0, uint128 divLowerPart1, uint128 _obfuscatedReserve0, uint128 _obfuscatedReserve1) = abi
             .decode(cleartexts, (uint128, uint128, uint128, uint128));
@@ -622,75 +671,73 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         _mintLP(mintAmount, user);
         _updateReserves(FHE.add(reserve0, amount0), FHE.add(reserve1, amount1));
 
-        delete pendingDecryption;
+        // Clear user's pending operation (Queue Mode)
+        _clearUserPendingOperation(user);
         delete standardRefund[user][requestID];
         delete addLiqDecBundle[requestID];
     }
 
-    /**
-     * @dev Internal function that manages the liquidity removal process.
-     * @param lpAmount Amount of lp token to remove.
-     * @param from The address that removes liquidity.
-     * @param to The address that will receive the tokens after lp burn.
-     * @param deadline Timestamp by which the liquidity removal must be completed.
-     */
+    // ========== REMOVE LIQUIDITY ==========
+
     function _removeLiquidity(
         euint64 lpAmount,
         address from,
         address to,
         uint256 deadline
-    ) internal ensure(deadline) decryptionAvailable {
+    ) internal ensure(deadline) userOperationAvailable {
         euint64 sentLP = _transferLPToPool(from, lpAmount);
         euint128 currentLPSupply128 = FHE.asEuint128(confidentialTotalSupply());
 
         (euint128 divUpperPart0, euint128 divUpperPart1, euint128 divLowerPart0, euint128 divLowerPart1) = SwapLib
             .computeRemoveLiquidity(reserve0, reserve1, sentLP, currentLPSupply128);
 
-        bytes32[] memory cts = new bytes32[](2);
-        cts[0] = FHE.toBytes32(divLowerPart0);
-        cts[1] = FHE.toBytes32(divLowerPart1);
-
-        uint256 requestID = FHE.requestDecryption(cts, this.removeLiquidityCallback.selector);
+        uint256 requestID = _getNextRequestID();
 
         removeLiqDecBundle[requestID]._lpSent = sentLP;
         removeLiqDecBundle[requestID]._upperPart0 = divUpperPart0;
         removeLiqDecBundle[requestID]._upperPart1 = divUpperPart1;
+        removeLiqDecBundle[requestID]._divLowerPart0 = divLowerPart0;
+        removeLiqDecBundle[requestID]._divLowerPart1 = divLowerPart1;
         removeLiqDecBundle[requestID]._from = from;
         removeLiqDecBundle[requestID]._to = to;
+        removeLiqDecBundle[requestID].timestamp = block.timestamp;
+        removeLiqDecBundle[requestID].active = true;
 
         FHE.allowThis(removeLiqDecBundle[requestID]._lpSent);
         FHE.allowThis(removeLiqDecBundle[requestID]._upperPart0);
         FHE.allowThis(removeLiqDecBundle[requestID]._upperPart1);
 
-        pendingDecryption.currentRequestID = requestID;
-        pendingDecryption.decryptionTimestamp = block.timestamp;
-        pendingDecryption.isPendingDecryption = true;
-        pendingDecryption.operation = Operation.RemoveLiquidity;
+        // Mark values as publicly decryptable (fhEVM 0.9.1)
+        FHE.makePubliclyDecryptable(divLowerPart0);
+        FHE.makePubliclyDecryptable(divLowerPart1);
+
+        // Set user's pending operation (Queue Mode)
+        _setUserPendingOperation(from, requestID, Operation.RemoveLiquidity);
 
         liquidityRemovalRefund[from][requestID].lpAmount = sentLP;
 
         FHE.allowThis(liquidityRemovalRefund[from][requestID].lpAmount);
         FHE.allow(liquidityRemovalRefund[from][requestID].lpAmount, from);
 
-        emit decryptionRequested(from, block.number, requestID);
+        bytes32[] memory handles = new bytes32[](2);
+        handles[0] = FHE.toBytes32(divLowerPart0);
+        handles[1] = FHE.toBytes32(divLowerPart1);
+
+        emit DecryptionPending(from, requestID, Operation.RemoveLiquidity, handles);
     }
 
-    /**
-     * @dev Callback for an remove-liquidity decryption request.
-     *      Verifies the request,,
-     *      computes the LP burn amount, rsend tokens to user, and updates reserves.
-     * @param requestID Gateway request identifier expected to match the pending one.
-     * @param cleartexts Decrypted division lower parts.
-     * @param decryptionProof Gateway signatures attesting the decryption result.
-     */
     function removeLiquidityCallback(
         uint256 requestID,
         bytes memory cleartexts,
         bytes memory decryptionProof
     ) external {
-        if (pendingDecryption.currentRequestID != requestID) revert WrongRequestID();
-        if (pendingDecryption.operation != Operation.RemoveLiquidity) revert UnexpectedOperation();
-        FHE.checkSignatures(requestID, cleartexts, decryptionProof);
+        if (!removeLiqDecBundle[requestID].active) revert RequestNotActive();
+
+        bytes32[] memory handles = new bytes32[](2);
+        handles[0] = FHE.toBytes32(removeLiqDecBundle[requestID]._divLowerPart0);
+        handles[1] = FHE.toBytes32(removeLiqDecBundle[requestID]._divLowerPart1);
+
+        FHE.checkSignatures(handles, cleartexts, decryptionProof);
 
         (uint128 divLowerPart0, uint128 divLowerPart1) = abi.decode(cleartexts, (uint128, uint128));
         if (divLowerPart0 == 0 || divLowerPart1 == 0) revert InvalidCleartext();
@@ -708,32 +755,16 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         _burn(address(this), burnAmount);
         emit liquidityBurnt(block.number, from);
 
-        delete pendingDecryption;
+        // Clear user's pending operation (Queue Mode)
+        _clearUserPendingOperation(from);
         delete liquidityRemovalRefund[from][requestID];
         delete removeLiqDecBundle[requestID];
     }
 
-    /**
-     * @dev Removes liquidity from the pool.
-     *      Allows a liquidity provider to change its liquidity tokens to token0 and token1.
-     *      This function is called by another contract.
-     * @param lpAmount Amount of lp token to remove.
-     * @param to Address to receive the tokens.
-     * @param deadline timestamp by which the liquidity removal must be completed.
-     */
     function removeLiquidity(euint64 lpAmount, address to, uint256 deadline) external {
         _removeLiquidity(lpAmount, msg.sender, to, deadline);
     }
 
-    /**
-     * @dev Removes liquidity from the pool.
-     *      Allows a liquidity provider to change its liquidity tokens to token0 and token1.
-     *      This function is called off-chain (from a dApp for example).
-     * @param encryptedLPAmount Amount of lp token to remove.
-     * @param to Address to receive the tokens.
-     * @param deadline timestamp by which the liquidity removal must be completed.
-     * * @param inputProof Proof used to verify the validity of encrypted inputs.
-     */
     function removeLiquidity(
         externalEuint64 encryptedLPAmount,
         address to,
@@ -741,40 +772,17 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         bytes calldata inputProof
     ) external {
         euint64 lpAmount = FHE.fromExternal(encryptedLPAmount, inputProof);
-
         _removeLiquidity(lpAmount, msg.sender, to, deadline);
     }
 
-    /**
-     * @dev Executes a swap operation within the pool.
-     *      Allows users to exchange `token0` for `token1` or vice versa.
-     *      Updates pending swaps for the current trading epoch and adjusts reserves.
-     *      Either amount0In or amount1In is null for a classic swap.
-     *      This function is called by another contract.
-     * @param amount0In Amount of `token0` being swapped into the pool.
-     * @param amount1In Amount of `token1` being swapped into the pool.
-     * @param to Address to receive the swapped tokens.
-     * @param deadline timestamp by which the swap must be completed.
-     */
+    // ========== SWAP ==========
+
     function swapTokens(euint64 amount0In, euint64 amount1In, address to, uint256 deadline) external {
-        //Allow tokens to use the amounts
         FHE.allowTransient(amount0In, token0Address);
         FHE.allowTransient(amount1In, token1Address);
-
         _swapTokens(amount0In, amount1In, msg.sender, to, deadline);
     }
 
-    /**
-     * @dev Executes a swap operation using encrypted token inputs.
-     *      Similar to the standard `swapTokens`, but uses encrypted inputs for the tokens being swapped.
-     *      Decrypts the inputs using the provided proof.
-     *      This function is called off-chain (from a dApp for example).
-     * @param encryptedAmount0In Encrypted amount of `token0` being swapped into the pool.
-     * @param encryptedAmount1In Encrypted amount of `token1` being swapped into the pool.
-     * @param to Address to receive the swapped tokens.
-     * @param deadline timestamp by which the swap must be completed.
-     * @param inputProof Proof used to verify the validity of encrypted inputs.
-     */
     function swapTokens(
         externalEuint64 encryptedAmount0In,
         externalEuint64 encryptedAmount1In,
@@ -785,60 +793,48 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         euint64 amount0In = FHE.fromExternal(encryptedAmount0In, inputProof);
         euint64 amount1In = FHE.fromExternal(encryptedAmount1In, inputProof);
 
-        //Allow tokens to use the amounts
         FHE.allowTransient(amount0In, token0Address);
         FHE.allowTransient(amount1In, token1Address);
 
         _swapTokens(amount0In, amount1In, msg.sender, to, deadline);
     }
 
-    /**
-     * @dev Executes a swap operation within the pool.
-     *      Internal function
-     *      Allows users to exchange `token0` for `token1` or vice versa.
-     *      Updates pending swaps for the current trading epoch and adjusts reserves.
-     *      Either amount0In or amount1In is null for a classic swap.
-     *      This function is only called by this contract.
-     * @param amount0In Amount of `token0` being swapped into the pool.
-     * @param amount1In Amount of `token1` being swapped into the pool.
-     * @param to Address to receive the swapped tokens.
-     * @param from Address from which tokens are taken to be swapped.
-     * @param deadline timestamp by which the swap must be completed.
-     */
     function _swapTokens(
         euint64 amount0In,
         euint64 amount1In,
         address from,
         address to,
         uint256 deadline
-    ) internal ensure(deadline) decryptionAvailable {
+    ) internal ensure(deadline) userOperationAvailable {
         (euint64 sent0, euint64 sent1) = _transferTokensToPool(from, amount0In, amount1In, true);
 
         (euint128 divUpperPart0, euint128 divUpperPart1, euint128 divLowerPart0, euint128 divLowerPart1) = SwapLib
             .computeSwap(sent0, sent1, reserve0, reserve1);
 
-        bytes32[] memory cts = new bytes32[](2);
-        cts[0] = FHE.toBytes32(divLowerPart0);
-        cts[1] = FHE.toBytes32(divLowerPart1);
-
-        uint256 requestID = FHE.requestDecryption(cts, this.swapTokensCallback.selector);
+        uint256 requestID = _getNextRequestID();
 
         swapDecBundle[requestID].divUpperPart0 = divUpperPart0;
         swapDecBundle[requestID].divUpperPart1 = divUpperPart1;
+        swapDecBundle[requestID].divLowerPart0 = divLowerPart0;
+        swapDecBundle[requestID].divLowerPart1 = divLowerPart1;
         swapDecBundle[requestID].amount0In = amount0In;
         swapDecBundle[requestID].amount1In = amount1In;
         swapDecBundle[requestID].from = from;
         swapDecBundle[requestID].to = to;
+        swapDecBundle[requestID].timestamp = block.timestamp;
+        swapDecBundle[requestID].active = true;
 
         FHE.allowThis(swapDecBundle[requestID].divUpperPart0);
         FHE.allowThis(swapDecBundle[requestID].divUpperPart1);
         FHE.allowThis(swapDecBundle[requestID].amount0In);
         FHE.allowThis(swapDecBundle[requestID].amount1In);
 
-        pendingDecryption.currentRequestID = requestID;
-        pendingDecryption.decryptionTimestamp = block.timestamp;
-        pendingDecryption.isPendingDecryption = true;
-        pendingDecryption.operation = Operation.Swap;
+        // Mark values as publicly decryptable (fhEVM 0.9.1)
+        FHE.makePubliclyDecryptable(divLowerPart0);
+        FHE.makePubliclyDecryptable(divLowerPart1);
+
+        // Set user's pending operation (Queue Mode)
+        _setUserPendingOperation(from, requestID, Operation.Swap);
 
         standardRefund[from][requestID].amount0 = sent0;
         standardRefund[from][requestID].amount1 = sent1;
@@ -848,22 +844,21 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         FHE.allow(standardRefund[from][requestID].amount0, from);
         FHE.allow(standardRefund[from][requestID].amount1, from);
 
-        emit decryptionRequested(from, block.number, requestID);
+        bytes32[] memory handles = new bytes32[](2);
+        handles[0] = FHE.toBytes32(divLowerPart0);
+        handles[1] = FHE.toBytes32(divLowerPart1);
+
+        emit DecryptionPending(from, requestID, Operation.Swap, handles);
     }
 
-    /**
-     * @dev Callback for a swap decryption request.
-     *      Verifies the request, computes swap outputs from decrypted divisors,
-     *      transfers tokens to the recipient, exposes I/O to the sender via ACL,
-     *      emits the Swap event, and clears pending state/refund.
-     * @param requestID Gateway request identifier expected to match the pending one.
-     * @param cleartexts Decrypted division lower parts .
-     * @param decryptionProof Gateway signatures attesting the decryption result.
-     */
     function swapTokensCallback(uint256 requestID, bytes memory cleartexts, bytes memory decryptionProof) external {
-        if (pendingDecryption.currentRequestID != requestID) revert WrongRequestID();
-        if (pendingDecryption.operation != Operation.Swap) revert UnexpectedOperation();
-        FHE.checkSignatures(requestID, cleartexts, decryptionProof);
+        if (!swapDecBundle[requestID].active) revert RequestNotActive();
+
+        bytes32[] memory handles = new bytes32[](2);
+        handles[0] = FHE.toBytes32(swapDecBundle[requestID].divLowerPart0);
+        handles[1] = FHE.toBytes32(swapDecBundle[requestID].divLowerPart1);
+
+        FHE.checkSignatures(handles, cleartexts, decryptionProof);
 
         (uint128 _divLowerPart0, uint128 _divLowerPart1) = abi.decode(cleartexts, (uint128, uint128));
         if (_divLowerPart0 == 0 || _divLowerPart1 == 0) revert InvalidCleartext();
@@ -873,7 +868,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         address from = swapDecBundle[requestID].from;
         address to = swapDecBundle[requestID].to;
 
-        // always fits, check overflow computation in SwapLib.computeSwap() comments.
         euint64 amount0Out = FHE.asEuint64(FHE.div(_divUpperPart0, _divLowerPart0));
         euint64 amount1Out = FHE.asEuint64(FHE.div(_divUpperPart1, _divLowerPart1));
 
@@ -889,11 +883,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         FHE.allow(swapOutput[requestID].amount0Out, from);
         FHE.allow(swapOutput[requestID].amount1Out, from);
 
-        FHE.allowThis(swapDecBundle[requestID].amount0In);
-        FHE.allowThis(swapDecBundle[requestID].amount1In);
-        FHE.allowThis(swapOutput[requestID].amount0Out);
-        FHE.allowThis(swapOutput[requestID].amount1Out);
-
         emit Swap(
             from,
             swapDecBundle[requestID].amount0In,
@@ -903,19 +892,15 @@ contract CAMMPair is ERC7984, SepoliaConfig {
             to
         );
 
-        delete pendingDecryption;
+        // Clear user's pending operation (Queue Mode)
+        _clearUserPendingOperation(from);
         delete standardRefund[from][requestID];
         delete swapDecBundle[requestID];
         delete swapOutput[requestID];
     }
 
-    /**
-     * @dev Requests a refund for a pending add-liquidity operation.
-     *      Sends back the original token inputs (without altering reserves),
-     *      cancels the pending decryption if it corresponds to this request,
-     *      and clears stored refund data.
-     * @param requestID Gateway request ID associated with the pending add-liquidity.
-     */
+    // ========== REFUNDS ==========
+
     function requestLiquidityAddingRefund(uint256 requestID) public {
         if (
             !FHE.isInitialized(standardRefund[msg.sender][requestID].amount0) ||
@@ -925,12 +910,11 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         euint64 refundAmount0 = standardRefund[msg.sender][requestID].amount0;
         euint64 refundAmount1 = standardRefund[msg.sender][requestID].amount1;
 
-        // No need to update reserves as they are not updated when liquidity is sent
         _transferTokensFromPool(msg.sender, refundAmount0, refundAmount1, false);
 
-        // If refund is sent prior to decryption we need to block the decryption
-        if (requestID == pendingDecryption.currentRequestID) {
-            delete pendingDecryption;
+        // Clear user's pending operation if this is their current one (Queue Mode)
+        if (userPendingOperation[msg.sender].requestID == requestID) {
+            _clearUserPendingOperation(msg.sender);
         }
 
         delete standardRefund[msg.sender][requestID];
@@ -938,13 +922,6 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         emit Refund(msg.sender, block.number, requestID);
     }
 
-    /**
-     * @dev Requests a refund for a pending swap operation.
-     *      Returns the input tokens to the caller (reserves are restored),
-     *      cancels the pending decryption if it corresponds to this request,
-     *      and clears stored refund data.
-     * @param requestID Gateway request ID associated with the pending swap.
-     */
     function requestSwapRefund(uint256 requestID) public {
         if (
             !FHE.isInitialized(standardRefund[msg.sender][requestID].amount0) ||
@@ -956,9 +933,9 @@ contract CAMMPair is ERC7984, SepoliaConfig {
 
         _transferTokensFromPool(msg.sender, refundAmount0, refundAmount1, true);
 
-        // If refund is sent prior to decryption we need to block the decryption
-        if (requestID == pendingDecryption.currentRequestID) {
-            delete pendingDecryption;
+        // Clear user's pending operation if this is their current one (Queue Mode)
+        if (userPendingOperation[msg.sender].requestID == requestID) {
+            _clearUserPendingOperation(msg.sender);
         }
 
         delete standardRefund[msg.sender][requestID];
@@ -967,21 +944,14 @@ contract CAMMPair is ERC7984, SepoliaConfig {
         emit Refund(msg.sender, block.number, requestID);
     }
 
-    /**
-     * @dev Requests a refund for a pending remove-liquidity operation.
-     *      Transfers the LP tokens (held by the pair) back to the caller,
-     *      cancels the pending decryption if it corresponds to this request,
-     *      and clears stored refund data.
-     * @param requestID Gateway request ID associated with the pending liquidity removal.
-     */
     function requestLiquidityRemovalRefund(uint256 requestID) public {
         if (!FHE.isInitialized(liquidityRemovalRefund[msg.sender][requestID].lpAmount)) revert NoRefund();
 
         _transfer(address(this), msg.sender, liquidityRemovalRefund[msg.sender][requestID].lpAmount);
 
-        // If refund is sent prior to decryption we need to block the decryption
-        if (requestID == pendingDecryption.currentRequestID) {
-            delete pendingDecryption;
+        // Clear user's pending operation if this is their current one (Queue Mode)
+        if (userPendingOperation[msg.sender].requestID == requestID) {
+            _clearUserPendingOperation(msg.sender);
         }
 
         delete liquidityRemovalRefund[msg.sender][requestID];
