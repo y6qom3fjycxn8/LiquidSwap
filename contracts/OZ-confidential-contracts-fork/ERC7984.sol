@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-// Fork of un-commited "@openzeppelin/confidential-contracts update to fhevm 0.8.0
+// Fork of un-commited "@openzeppelin/confidential-contracts update to fhevm 0.9.1
 // See : https://github.com/OpenZeppelin/openzeppelin-confidential-contracts/pull/202
+// Updated for fhEVM 0.9.1 self-relaying decryption pattern
 
 pragma solidity ^0.8.27;
 
@@ -190,12 +191,16 @@ abstract contract ERC7984 is IERC7984 {
         FHE.allowTransient(transferred, msg.sender);
     }
 
+    /// @dev Emitted when an encrypted amount disclosure is requested (fhEVM 0.9.1 pattern)
+    event AmountDisclosureRequested(euint64 indexed encryptedAmount, address indexed requester);
+
     /**
      * @dev Discloses an encrypted amount `encryptedAmount` publicly via an {IERC7984-AmountDisclosed}
      * event. The caller and this contract must be authorized to use the encrypted amount on the ACL.
      *
-     * NOTE: This is an asynchronous operation where the actual decryption happens off-chain and
-     * {finalizeDiscloseEncryptedAmount} is called with the result.
+     * NOTE: In fhEVM 0.9.1, decryption uses self-relaying pattern. This function marks the amount
+     * as publicly decryptable. The client should then use the relayer SDK to decrypt off-chain
+     * and call finalizeDiscloseEncryptedAmount with the result.
      */
     function discloseEncryptedAmount(euint64 encryptedAmount) public virtual {
         require(
@@ -203,32 +208,35 @@ abstract contract ERC7984 is IERC7984 {
             ERC7984UnauthorizedUseOfEncryptedAmount(encryptedAmount, msg.sender)
         );
 
-        bytes32[] memory cts = new bytes32[](1);
-        cts[0] = euint64.unwrap(encryptedAmount);
-        FHE.requestDecryption(cts, this.finalizeDiscloseEncryptedAmount.selector);
+        // Mark the encrypted amount as publicly decryptable (fhEVM 0.9.1)
+        FHE.makePubliclyDecryptable(encryptedAmount);
+
+        // Emit event so client knows to decrypt this value
+        emit AmountDisclosureRequested(encryptedAmount, msg.sender);
     }
 
     /**
      * @dev Finalizes a disclose encrypted amount request.
-     * For gas saving purposes, the `requestId` might not be related to a
-     * {discloseEncryptedAmount} request. As a result, the current {finalizeDiscloseEncryptedAmount}
-     * function might emit a disclosed amount related to another decryption request context.
-     * In this case it would only display public information
-     * since the handle would have already been allowed for public decryption through a previous
-     * `FHE.requestDecryption` call.
-     * The downside of this behavior is that a {finalizeDiscloseEncryptedAmount} watcher might observe
-     * unexpected `AmountDisclosed` events.
+     * In fhEVM 0.9.1, the client decrypts off-chain using the relayer SDK and submits
+     * the cleartext with a proof for on-chain verification.
+     * @param encryptedAmount The original encrypted amount handle
+     * @param cleartexts The decrypted cleartext value (abi.encode(uint64))
+     * @param signatures The proof signatures from the decryption
      */
     function finalizeDiscloseEncryptedAmount(
-        uint256 requestId,
+        euint64 encryptedAmount,
         bytes memory cleartexts,
         bytes memory signatures
     ) public virtual {
-        FHE.checkSignatures(requestId, cleartexts, signatures);
+        // Verify the decryption proof using fhEVM 0.9.1 checkSignatures
+        // checkSignatures requires bytes32[] handlesList
+        bytes32[] memory handles = new bytes32[](1);
+        handles[0] = FHE.toBytes32(encryptedAmount);
+        FHE.checkSignatures(handles, cleartexts, signatures);
+
         uint64 amount = abi.decode(cleartexts, (uint64));
 
-        euint64 requestHandle = euint64.wrap(FHE.loadRequestedHandles(requestId)[0]);
-        emit AmountDisclosed(requestHandle, amount);
+        emit AmountDisclosed(encryptedAmount, amount);
     }
 
     function _setOperator(address holder, address operator, uint48 until) internal virtual {
