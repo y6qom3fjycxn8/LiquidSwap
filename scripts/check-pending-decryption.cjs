@@ -9,7 +9,7 @@ async function main() {
   const pairAddress = deployment.contracts.swapPair.address;
   console.log(`📍 Swap Pair: ${pairAddress}\n`);
 
-  const pair = await hre.ethers.getContractAt("CAMMPair", pairAddress);
+  const pair = await hre.ethers.getContractAt("LiquidSwapPair", pairAddress);
 
   try {
     const [requestID, isPending, timestamp, operation] = await pair.getPendingDecryptionInfo();

@@ -45,19 +45,19 @@ async function main() {
 
   // Step 4: Deploy Swap Pair with linked library
   console.log('📦 Step 4: Deploying Swap Pair Contract...');
-  const CAMMPair = await hre.ethers.getContractFactory('CAMMPair', {
+  const SwapPair = await hre.ethers.getContractFactory('LiquidSwapPair', {
     libraries: {
       SwapLib: swapLibAddress,
     },
   });
-  const cammPair = await CAMMPair.deploy(hre.ethers.ZeroAddress);
-  await cammPair.waitForDeployment();
-  const cammPairAddress = await cammPair.getAddress();
-  console.log('✅ Swap Pair deployed to:', cammPairAddress, '\n');
+  const swapPair = await SwapPair.deploy(hre.ethers.ZeroAddress);
+  await swapPair.waitForDeployment();
+  const swapPairAddress = await swapPair.getAddress();
+  console.log('✅ Swap Pair deployed to:', swapPairAddress, '\n');
 
   // Step 5: Initialize Swap Pair with token addresses
   console.log('📦 Step 5: Initializing Swap Pair with tokens...');
-  const initTx = await cammPair.initialize(token0Address, token1Address);
+  const initTx = await swapPair.initialize(token0Address, token1Address);
   await initTx.wait();
   console.log('✅ Swap Pair initialized successfully\n');
 
@@ -86,7 +86,7 @@ async function main() {
         address: swapLibAddress,
       },
       swapPair: {
-        address: cammPairAddress,
+        address: swapPairAddress,
         token0: token0Address,
         token1: token1Address,
       },
@@ -119,23 +119,23 @@ async function main() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('TOKEN0 (LUSD):', token0Address);
   console.log('TOKEN1 (LETH):', token1Address);
-  console.log('Swap Pair:    ', cammPairAddress);
+  console.log('Swap Pair:    ', swapPairAddress);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   console.log('📋 NEXT STEPS:');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('1. Update src/config/contracts.ts:');
-  console.log(`   SWAP_PAIR_ADDRESS = '${cammPairAddress}'`);
+  console.log(`   SWAP_PAIR_ADDRESS = '${swapPairAddress}'`);
   console.log(`   TOKEN0_ADDRESS = '${token0Address}'`);
   console.log(`   TOKEN1_ADDRESS = '${token1Address}'`);
   console.log('');
   console.log('2. Verify contracts (optional):');
   console.log('   npx hardhat verify --network sepolia', token0Address, '"Liquid USD" "LUSD" ""');
   console.log('   npx hardhat verify --network sepolia', token1Address, '"Liquid ETH" "LETH" ""');
-  console.log('   npx hardhat verify --network sepolia', cammPairAddress, hre.ethers.ZeroAddress);
+  console.log('   npx hardhat verify --network sepolia', swapPairAddress, hre.ethers.ZeroAddress);
   console.log('');
   console.log('3. View on Etherscan:');
-  console.log(`   https://sepolia.etherscan.io/address/${cammPairAddress}`);
+  console.log(`   https://sepolia.etherscan.io/address/${swapPairAddress}`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 }
 

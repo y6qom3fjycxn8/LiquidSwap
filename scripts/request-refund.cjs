@@ -12,7 +12,7 @@ async function main() {
   const [signer] = await hre.ethers.getSigners();
   console.log(`👤 Requesting from: ${signer.address}\n`);
 
-  const pair = await hre.ethers.getContractAt("CAMMPair", pairAddress);
+  const pair = await hre.ethers.getContractAt("LiquidSwapPair", pairAddress);
 
   try {
     // Get current pending status
