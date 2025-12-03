@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { ArrowDownUp, Settings, Loader2 } from "lucide-react";
+import { ArrowDownUp, Loader2 } from "lucide-react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,6 @@ import { toast } from "sonner";
 import { parseUnits } from "viem";
 import {
   useSwapTokens,
-  useTokenBalance,
   useToken0Address,
   useToken1Address,
   usePendingDecryptionInfo,
@@ -19,8 +18,9 @@ import {
   useHasLiquidity,
   useRequestSwapRefund,
 } from "@/hooks/useSwapPair";
+import { useDecryptionCallback } from "@/hooks/useDecryptionCallback";
 import { encryptTwoUint64 } from "@/lib/fhe";
-import { SWAP_PAIR_ADDRESS } from "@/config/contracts";
+import { SWAP_PAIR_ADDRESS } from "@/lib/contracts";
 
 const SwapCard = () => {
   const { address, isConnected } = useAccount();
@@ -29,13 +29,17 @@ const SwapCard = () => {
   const [isEncrypting, setIsEncrypting] = useState(false);
   const [swapDirection, setSwapDirection] = useState<"0to1" | "1to0">("0to1"); // 0to1 means swap token0 for token1
 
+  // fhEVM 0.9.1 - Decryption callback hook
+  const {
+    isDecrypting,
+    isSubmitting: isCallbackSubmitting,
+    isConfirming: isCallbackConfirming,
+    isSuccess: isCallbackSuccess,
+  } = useDecryptionCallback(address);
+
   // Get token addresses
   const { token0Address } = useToken0Address();
   const { token1Address } = useToken1Address();
-
-  // Get balances
-  const { balance: token0Balance, refetch: refetchToken0 } = useTokenBalance(token0Address, address);
-  const { balance: token1Balance, refetch: refetchToken1 } = useTokenBalance(token1Address, address);
 
   // Get allowances
   const { allowance: token0Allowance, refetch: refetchAllowance0 } = useTokenAllowance(token0Address, address);
@@ -43,8 +47,8 @@ const SwapCard = () => {
 
   const { hasLiquidity } = useHasLiquidity();
 
-  // Get pending decryption status
-  const { pendingDecryption, refetch: refetchPending } = usePendingDecryptionInfo();
+  // Get pending decryption status (Queue Mode: per-user)
+  const { pendingDecryption, refetch: refetchPending } = usePendingDecryptionInfo(address);
 
   // Contract hooks
   const { swapTokens, hash, isPending, isConfirming, isSuccess, error } = useSwapTokens();
@@ -59,9 +63,6 @@ const SwapCard = () => {
   } = useRequestSwapRefund();
 
   const fromToken = swapDirection === "0to1" ? token0Address : token1Address;
-  const toToken = swapDirection === "0to1" ? token1Address : token0Address;
-  const fromBalance = swapDirection === "0to1" ? token0Balance : token1Balance;
-  const toBalance = swapDirection === "0to1" ? token1Balance : token0Balance;
   const fromAllowance = swapDirection === "0to1" ? token0Allowance : token1Allowance;
 
   // Monitor swap transaction submission
@@ -112,11 +113,9 @@ const SwapCard = () => {
 
       setFromAmount("");
       setIsSwapping(false);
-      refetchToken0();
-      refetchToken1();
       refetchPending();
     }
-  }, [isSuccess, hash, refetchToken0, refetchToken1, refetchPending]);
+  }, [isSuccess, hash, refetchPending]);
 
   // Monitor swap transaction errors
   useEffect(() => {
@@ -417,7 +416,10 @@ const SwapCard = () => {
     if (isEncrypting) return "Encrypting...";
     if (isPending) return "Confirming Transaction...";
     if (isConfirming) return "Waiting for Confirmation...";
-    if (pendingDecryption?.isPending) return "Decryption Pending...";
+    if (isDecrypting) return "Decrypting Values...";
+    if (isCallbackSubmitting) return "Submitting Callback...";
+    if (isCallbackConfirming) return "Finalizing Swap...";
+    if (pendingDecryption?.isPending) return "Processing...";
     if (hasLiquidity === false) return "Add Liquidity First";
     if (needsAuthorization()) return "Authorize Token First";
     return "Swap";
@@ -432,10 +434,7 @@ const SwapCard = () => {
 
       {/* From Token */}
       <div className="space-y-2 mb-2">
-        <div className="flex justify-between items-center">
-          <Label className="text-sm text-muted-foreground">From</Label>
-          {fromBalance && <span className="text-xs text-muted-foreground">Balance: Encrypted</span>}
-        </div>
+        <Label className="text-sm text-muted-foreground">From</Label>
         <div className="relative">
           <Input
             type="number"
@@ -478,10 +477,7 @@ const SwapCard = () => {
 
       {/* To Token */}
       <div className="space-y-2 mb-6">
-        <div className="flex justify-between">
-          <Label className="text-sm text-muted-foreground">To (estimated)</Label>
-          {toBalance && <span className="text-xs text-muted-foreground">Balance: Encrypted</span>}
-        </div>
+        <Label className="text-sm text-muted-foreground">To (estimated)</Label>
         <div className="relative">
           <Input
             type="text"
@@ -542,11 +538,23 @@ const SwapCard = () => {
         {getButtonText()}
       </Button>
 
-      {/* Pending Decryption Warning */}
-      {pendingDecryption?.isPending && (
+      {/* Pending Decryption/Callback Status */}
+      {(pendingDecryption?.isPending || isDecrypting || isCallbackSubmitting || isCallbackConfirming) && (
         <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
           <p className="text-sm text-yellow-600 dark:text-yellow-400 text-center">
-            ⏳ Decryption in progress... Please wait
+            {isDecrypting && "🔓 Decrypting encrypted values..."}
+            {isCallbackSubmitting && "📤 Submitting decryption proof..."}
+            {isCallbackConfirming && "⏳ Finalizing swap on-chain..."}
+            {!isDecrypting && !isCallbackSubmitting && !isCallbackConfirming && pendingDecryption?.isPending && "⏳ Processing operation..."}
+          </p>
+        </div>
+      )}
+
+      {/* Callback Success */}
+      {isCallbackSuccess && (
+        <div className="mt-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+          <p className="text-sm text-green-600 dark:text-green-400 text-center">
+            ✅ Swap completed successfully!
           </p>
         </div>
       )}

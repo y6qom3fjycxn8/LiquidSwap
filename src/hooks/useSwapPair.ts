@@ -1,5 +1,5 @@
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { SWAP_PAIR_ADDRESS, SWAP_PAIR_ABI, TOKEN0_ADDRESS, TOKEN1_ADDRESS, ERC7984_ABI } from '@/config/contracts';
+import { SWAP_PAIR_ADDRESS, SWAP_PAIR_ABI, TOKEN0_ADDRESS, TOKEN1_ADDRESS, ERC7984_ABI } from '@/lib/contracts';
 
 export interface PendingDecryption {
   requestID: bigint;
@@ -71,12 +71,14 @@ export function useTotalSupply() {
   };
 }
 
-// Hook to get pending decryption info
-export function usePendingDecryptionInfo() {
+// Hook to get pending operation info for a specific user (Queue Mode)
+// In Queue Mode, each user has their own pending operation state
+export function usePendingDecryptionInfo(userAddress?: `0x${string}`) {
   const { data, isLoading, error, refetch } = useReadContract({
     address: SWAP_PAIR_ADDRESS,
     abi: SWAP_PAIR_ABI,
-    functionName: 'getPendingDecryptionInfo',
+    functionName: 'getUserPendingOperationInfo',
+    args: userAddress ? [userAddress] : undefined,
   });
 
   const result = data as [bigint, boolean, bigint, number] | undefined;
@@ -354,6 +356,92 @@ export function useMintToken(tokenAddress?: `0x${string}`) {
 
   return {
     mint,
+    hash,
+    isPending,
+    isConfirming,
+    isSuccess,
+    error,
+  };
+}
+
+// ============ fhEVM 0.9.1 Callback Hooks ============
+
+// Hook to submit add liquidity callback
+export function useAddLiquidityCallback() {
+  const { writeContract, data: hash, isPending, error } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+
+  const submitCallback = async (
+    requestID: bigint,
+    cleartexts: `0x${string}`,
+    decryptionProof: `0x${string}`
+  ) => {
+    writeContract({
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
+      functionName: 'addLiquidityCallback',
+      args: [requestID, cleartexts, decryptionProof],
+    });
+  };
+
+  return {
+    submitCallback,
+    hash,
+    isPending,
+    isConfirming,
+    isSuccess,
+    error,
+  };
+}
+
+// Hook to submit swap callback
+export function useSwapCallback() {
+  const { writeContract, data: hash, isPending, error } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+
+  const submitCallback = async (
+    requestID: bigint,
+    cleartexts: `0x${string}`,
+    decryptionProof: `0x${string}`
+  ) => {
+    writeContract({
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
+      functionName: 'swapTokensCallback',
+      args: [requestID, cleartexts, decryptionProof],
+    });
+  };
+
+  return {
+    submitCallback,
+    hash,
+    isPending,
+    isConfirming,
+    isSuccess,
+    error,
+  };
+}
+
+// Hook to submit remove liquidity callback
+export function useRemoveLiquidityCallback() {
+  const { writeContract, data: hash, isPending, error } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+
+  const submitCallback = async (
+    requestID: bigint,
+    cleartexts: `0x${string}`,
+    decryptionProof: `0x${string}`
+  ) => {
+    writeContract({
+      address: SWAP_PAIR_ADDRESS,
+      abi: SWAP_PAIR_ABI,
+      functionName: 'removeLiquidityCallback',
+      args: [requestID, cleartexts, decryptionProof],
+    });
+  };
+
+  return {
+    submitCallback,
     hash,
     isPending,
     isConfirming,

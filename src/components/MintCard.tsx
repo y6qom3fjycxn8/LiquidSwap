@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { parseUnits } from "viem";
-import { useMintToken, useTokenBalance, useToken0Address, useToken1Address } from "@/hooks/useSwapPair";
+import { useMintToken, useToken0Address, useToken1Address } from "@/hooks/useSwapPair";
 import { encryptUint64 } from "@/lib/fhe";
 
 const MintCard = () => {
@@ -21,10 +21,6 @@ const MintCard = () => {
   // Get token addresses
   const { token0Address } = useToken0Address();
   const { token1Address } = useToken1Address();
-
-  // Get balances
-  const { balance: token0Balance, refetch: refetchToken0 } = useTokenBalance(token0Address, address);
-  const { balance: token1Balance, refetch: refetchToken1 } = useTokenBalance(token1Address, address);
 
   // Mint hooks
   const { mint: mintToken0, hash: hash0, isPending: isPending0, isConfirming: isConfirming0, isSuccess: isSuccess0, error: error0 } = useMintToken(token0Address);
@@ -89,10 +85,8 @@ const MintCard = () => {
       );
 
       setIsMinting(false);
-      refetchToken0();
-      refetchToken1();
     }
-  }, [isSuccess0, isSuccess1, hash0, hash1, refetchToken0, refetchToken1]);
+  }, [isSuccess0, isSuccess1, hash0, hash1]);
 
   // Monitor transaction errors
   useEffect(() => {
@@ -223,11 +217,6 @@ const MintCard = () => {
         <div className="space-y-6">
           <div className="space-y-3">
             <Label className="text-lg font-semibold">Liquid USD (LUSD)</Label>
-            {token0Balance !== undefined && (
-              <div className="text-sm text-muted-foreground">
-                Current Balance: {token0Balance.toString()} LUSD (encrypted)
-              </div>
-            )}
             <div className="flex gap-2">
               <Input
                 type="number"
@@ -255,11 +244,6 @@ const MintCard = () => {
 
           <div className="space-y-3">
             <Label className="text-lg font-semibold">Liquid ETH (LETH)</Label>
-            {token1Balance !== undefined && (
-              <div className="text-sm text-muted-foreground">
-                Current Balance: {token1Balance.toString()} LETH (encrypted)
-              </div>
-            )}
             <div className="flex gap-2">
               <Input
                 type="number"

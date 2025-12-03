@@ -19,8 +19,9 @@ import {
   useHasLiquidity,
   useRequestLiquidityAddingRefund,
 } from "@/hooks/useSwapPair";
+import { useDecryptionCallback } from "@/hooks/useDecryptionCallback";
 import { encryptTwoUint64 } from "@/lib/fhe";
-import { SWAP_PAIR_ADDRESS } from "@/config/contracts";
+import { SWAP_PAIR_ADDRESS } from "@/lib/contracts";
 
 const AddLiquidityCard = () => {
   const { address, isConnected } = useAccount();
@@ -28,6 +29,14 @@ const AddLiquidityCard = () => {
   const [token1Amount, setToken1Amount] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [isEncrypting, setIsEncrypting] = useState(false);
+
+  // fhEVM 0.9.1 - Decryption callback hook
+  const {
+    isDecrypting,
+    isSubmitting: isCallbackSubmitting,
+    isConfirming: isCallbackConfirming,
+    isSuccess: isCallbackSuccess,
+  } = useDecryptionCallback(address);
 
   // Get token addresses
   const { token0Address } = useToken0Address();
@@ -41,8 +50,8 @@ const AddLiquidityCard = () => {
   const { allowance: token0Allowance, refetch: refetchAllowance0 } = useTokenAllowance(token0Address, address);
   const { allowance: token1Allowance, refetch: refetchAllowance1 } = useTokenAllowance(token1Address, address);
 
-  // Get pending decryption status
-  const { pendingDecryption, refetch: refetchPending } = usePendingDecryptionInfo();
+  // Get pending decryption status (Queue Mode: per-user)
+  const { pendingDecryption, refetch: refetchPending } = usePendingDecryptionInfo(address);
   const { refetch: refetchHasLiquidity } = useHasLiquidity();
 
   // Contract hooks
@@ -397,8 +406,11 @@ const AddLiquidityCard = () => {
     if (isEncrypting) return "Encrypting...";
     if (isPending) return "Confirming Transaction...";
     if (isConfirming) return "Waiting for Confirmation...";
-    if (pendingDecryption?.isPending) return "Decryption Pending...";
-      if (needsAuthorization(0) || needsAuthorization(1)) return "Authorize Tokens First";
+    if (isDecrypting) return "Decrypting Values...";
+    if (isCallbackSubmitting) return "Submitting Callback...";
+    if (isCallbackConfirming) return "Finalizing...";
+    if (pendingDecryption?.isPending) return "Processing...";
+    if (needsAuthorization(0) || needsAuthorization(1)) return "Authorize Tokens First";
     return "Add Liquidity";
   };
 
@@ -532,16 +544,28 @@ const AddLiquidityCard = () => {
         {getButtonText()}
       </Button>
 
-      {/* Pending Decryption Warning */}
-      {pendingDecryption?.isPending && (
+      {/* Pending Decryption/Callback Status */}
+      {(pendingDecryption?.isPending || isDecrypting || isCallbackSubmitting || isCallbackConfirming) && (
         <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
           <p className="text-sm text-yellow-600 dark:text-yellow-400 text-center">
-            ⏳ Decryption in progress... Please wait
+            {isDecrypting && "🔓 Decrypting encrypted values..."}
+            {isCallbackSubmitting && "📤 Submitting decryption proof..."}
+            {isCallbackConfirming && "⏳ Finalizing liquidity addition..."}
+            {!isDecrypting && !isCallbackSubmitting && !isCallbackConfirming && pendingDecryption?.isPending && "⏳ Processing operation..."}
+          </p>
+        </div>
+      )}
+
+      {/* Callback Success */}
+      {isCallbackSuccess && (
+        <div className="mt-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+          <p className="text-sm text-green-600 dark:text-green-400 text-center">
+            ✅ Liquidity added successfully!
           </p>
         </div>
       )}
     </Card>
-);
+  );
 };
 
 export default AddLiquidityCard;
