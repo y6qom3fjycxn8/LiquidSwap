@@ -4,17 +4,17 @@ import Footer from "@/components/Footer";
 const CONTRACTS = [
   {
     name: "Swap Pair",
-    address: "0xc68abF4A812060b587Cd9CC9Bba6a9e2D1df00e0",
-    description: "Main automated market maker contract handling swaps, liquidity, and encrypted storage.",
+    address: "0xc04d680Cc4d7F9FF9F9f2e297ce0bE493Fb967a6",
+    description: "Main automated market maker contract handling swaps, liquidity, and encrypted storage (fhEVM 0.9.1).",
   },
   {
     name: "Liquid USD (LUSD)",
-    address: "0x534df81296D12C971a6BF8BfA609eD744e2610A3",
+    address: "0x05A59BC45f45Dab07d165d35f65Db148946d5D8f",
     description: "Confidential ERC7984 stable token used for the USD side of the pool.",
   },
   {
     name: "Liquid ETH (LETH)",
-    address: "0xf678ca1012Cf4AD86F4FD2BbBfc25a34F915b3fA",
+    address: "0x1BE873BdA63401D7cE59174C1a6c1E167E737eEE",
     description: "Confidential ERC7984 asset representing wrapped ETH liquidity.",
   },
 ];

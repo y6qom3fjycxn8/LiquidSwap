@@ -3,7 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Required for fhEVM 0.9.1 relayer SDK -->
+    <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin" />
+    <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="preconnect" href="https://cdn.zama.org" />
     <title>LiquidSwap - Privacy-First Decentralized Exchange</title>
     <meta name="description" content="LiquidSwap is a revolutionary FHE-based AMM providing fully encrypted swaps and liquidity pools. Trade with complete privacy and security." />
     <meta name="author" content="LiquidSwap" />
@@ -20,7 +24,12 @@
 
   <body>
     <div id="root"></div>
-    <script src="https://cdn.zama.ai/relayer-sdk-js/0.2.0/relayer-sdk-js.umd.cjs"></script>
+    <!-- fhEVM 0.9.1 Relayer SDK -->
+    <script
+      src="https://cdn.zama.org/relayer-sdk-js/0.3.0-5/relayer-sdk-js.umd.cjs"
+      defer
+      crossorigin="anonymous"
+    ></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

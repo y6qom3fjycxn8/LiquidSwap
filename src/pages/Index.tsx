@@ -44,7 +44,7 @@ const Index = () => {
           </div>
         </section>
 
-        {/* Swap Section - Under Development */}
+        {/* Swap Section */}
         <section id="swap" className="py-24 px-4 bg-muted/50">
           <div className="container mx-auto max-w-6xl">
             <div className="text-center mb-12 animate-fade-in">
@@ -55,19 +55,7 @@ const Index = () => {
                 Experience privacy-first decentralized exchange
               </p>
             </div>
-            <div className="max-w-md mx-auto p-12 rounded-2xl border-2 border-dashed border-muted-foreground/30 bg-card">
-              <div className="text-center space-y-4">
-                <div className="mx-auto w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-                  <svg className="w-8 h-8 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                  </svg>
-                </div>
-                <h3 className="text-2xl font-bold">Under Development</h3>
-                <p className="text-muted-foreground">
-                  The swap functionality is currently being optimized. Please check back soon!
-                </p>
-              </div>
-            </div>
+            <SwapCard />
           </div>
         </section>
 
