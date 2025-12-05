@@ -1,7 +1,7 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "liquidswap",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.9.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,13 @@
     "compile": "hardhat --config hardhat.config.cjs compile",
     "deploy": "hardhat --config hardhat.config.cjs run scripts/deploy.cjs --network sepolia",
     "mint": "hardhat --config hardhat.config.cjs run scripts/mint-tokens.cjs --network sepolia",
-    "test": "vitest"
+    "test": "vitest",
+    "test:contracts": "hardhat --config hardhat.config.cjs test",
+    "test:contracts:pair": "hardhat --config hardhat.config.cjs test test/LiquidSwapPair.test.js",
+    "test:contracts:liquidity": "hardhat --config hardhat.config.cjs test test/AddLiquidity.test.js",
+    "test:contracts:swap": "hardhat --config hardhat.config.cjs test test/SwapTokens.test.js",
+    "test:contracts:refund": "hardhat --config hardhat.config.cjs test test/RefundMechanism.test.js",
+    "test:contracts:token": "hardhat --config hardhat.config.cjs test test/ConfidentialToken.test.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -70,6 +76,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
+    "@fhevm/hardhat-plugin": "^0.3.0-1",
+    "@fhevm/solidity": "^0.9.1",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@tailwindcss/typography": "^0.5.16",
     "@types/node": "^22.16.5",

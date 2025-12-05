@@ -1,5 +1,10 @@
 require('@nomicfoundation/hardhat-toolbox');
+require('@fhevm/hardhat-plugin');
 require('dotenv').config();
+
+// Chai configuration for better error messages
+const chai = require('chai');
+chai.config.truncateThreshold = 0;
 
 module.exports = {
   solidity: {
