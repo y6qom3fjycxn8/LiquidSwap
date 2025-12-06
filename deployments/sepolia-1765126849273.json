@@ -1,0 +1,25 @@
+{
+  "network": "sepolia",
+  "deployer": "0x88Ea5031bB5c71663b922206D11B4D87DB05b26a",
+  "timestamp": "2025-12-07T17:00:49.273Z",
+  "contracts": {
+    "token0": {
+      "address": "0x05A59BC45f45Dab07d165d35f65Db148946d5D8f",
+      "name": "Liquid USD",
+      "symbol": "LUSD"
+    },
+    "token1": {
+      "address": "0x1BE873BdA63401D7cE59174C1a6c1E167E737eEE",
+      "name": "Liquid ETH",
+      "symbol": "LETH"
+    },
+    "swapLib": {
+      "address": "0x21841D8845506e6e0612F69DA56589397E64D3A6"
+    },
+    "swapPair": {
+      "address": "0xc04d680Cc4d7F9FF9F9f2e297ce0bE493Fb967a6",
+      "token0": "0x05A59BC45f45Dab07d165d35f65Db148946d5D8f",
+      "token1": "0x1BE873BdA63401D7cE59174C1a6c1E167E737eEE"
+    }
+  }
+}
