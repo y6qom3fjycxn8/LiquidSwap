@@ -1,374 +1,677 @@
 # LiquidSwap
 
-> **Privacy-First Decentralized Exchange** built on Zama's Fully Homomorphic Encryption (FHE) technology
+> **Privacy-First Decentralized Exchange** — A Confidential Swap Protocol powered by Zama's Fully Homomorphic Encryption (FHE)
 
-![LiquidSwap Banner](https://img.shields.io/badge/Zama-fhEVM-blue) ![Solidity](https://img.shields.io/badge/Solidity-0.8.27-lightgrey) ![React](https://img.shields.io/badge/React-18-61DAFB) ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6)
+![fhEVM](https://img.shields.io/badge/fhEVM-0.9.1-blue) ![Solidity](https://img.shields.io/badge/Solidity-0.8.27-lightgrey) ![React](https://img.shields.io/badge/React-18.3-61DAFB) ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6) ![Wagmi](https://img.shields.io/badge/Wagmi-2.19-black)
 
-LiquidSwap is a confidential automated market maker (AMM) that enables fully private token swaps and liquidity provision on Ethereum Sepolia testnet. Built with Zama's fhEVM v0.8.0, all sensitive trading data—including token amounts, balances, and liquidity positions—remain encrypted end-to-end, both on-chain and during computation.
-
-🌐 **Live Demo**: [https://fhe-liquidswap.vercel.app](https://fhe-liquidswap.vercel.app)
-📖 **Documentation**: [https://fhe-liquidswap.vercel.app/docs](https://fhe-liquidswap.vercel.app/docs)
-🔗 **GitHub**: [https://github.com/y6qom3fjycxn8/LiquidSwap](https://github.com/y6qom3fjycxn8/LiquidSwap)
+**Live Demo**: [https://fhe-liquidswap.vercel.app](https://fhe-liquidswap.vercel.app)
 
 ---
 
 ## Table of Contents
 
-- [Why LiquidSwap?](#why-liquidswap)
-- [How It Works](#how-it-works)
-  - [Fully Homomorphic Encryption (FHE)](#fully-homomorphic-encryption-fhe)
-  - [Architecture Overview](#architecture-overview)
-- [Smart Contract Design](#smart-contract-design)
-  - [Core Contracts](#core-contracts)
-  - [Liquidity Management](#liquidity-management)
-  - [Asynchronous Decryption](#asynchronous-decryption)
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+  - [System Architecture](#system-architecture)
+  - [Contract Architecture](#contract-architecture)
+  - [Frontend Architecture](#frontend-architecture)
+- [AMM Mechanism](#amm-mechanism)
+  - [Constant Product Formula](#constant-product-formula)
+  - [Encrypted Swap Computation](#encrypted-swap-computation)
+  - [Fee Structure](#fee-structure)
   - [Reserve Obfuscation](#reserve-obfuscation)
-- [Frontend Integration](#frontend-integration)
+- [fhEVM 0.9.1 Self-Relaying Pattern](#fhevm-091-self-relaying-pattern)
+  - [Decryption Flow](#decryption-flow)
+  - [Operation Lifecycle](#operation-lifecycle)
+- [Queue Mode Architecture](#queue-mode-architecture)
+  - [Per-User Pending Operations](#per-user-pending-operations)
+  - [Concurrent User Support](#concurrent-user-support)
+- [Smart Contract Reference](#smart-contract-reference)
+  - [LiquidSwapPair (LiquidSwap.sol)](#liquidswappair-liquidswapsol)
+  - [SwapLib](#swaplib)
+  - [ConfidentialToken (ERC7984)](#confidentialtoken-erc7984)
 - [Deployed Contracts](#deployed-contracts)
+- [Dependency Versions](#dependency-versions)
 - [Getting Started](#getting-started)
-- [Development](#development)
-- [Roadmap](#roadmap)
 - [Security Considerations](#security-considerations)
 - [License](#license)
 
 ---
 
-## Why LiquidSwap?
+## Overview
 
-Traditional DEXs expose sensitive trading information on-chain:
-- **Trade sizes** are visible to MEV bots and front-runners
-- **Wallet balances** can be tracked by anyone
-- **Liquidity positions** reveal trading strategies
+LiquidSwap is a **Confidential Swap Protocol** that enables fully private token swaps and liquidity provision on Ethereum. Built with Zama's fhEVM v0.9.1, all sensitive trading data—token amounts, balances, reserves, and LP positions—remain encrypted throughout the entire transaction lifecycle.
 
-LiquidSwap solves this with **Fully Homomorphic Encryption**:
-- ✅ **Private Trades**: Swap amounts stay encrypted on-chain
-- ✅ **Hidden Balances**: Token balances are never revealed
-- ✅ **Confidential Liquidity**: LP positions remain private
-- ✅ **MEV Protection**: Front-running is mathematically impossible
-- ✅ **Trustless**: No trusted third parties or oracles
+### The Problem with Traditional DEXs
+
+| Vulnerability | Impact |
+|--------------|--------|
+| **Visible Trade Amounts** | MEV bots front-run transactions |
+| **Public Balances** | Wallet surveillance and tracking |
+| **Exposed Reserves** | Arbitrage bots exploit price movements |
+| **Transaction Transparency** | Trading strategies are exposed |
+
+### LiquidSwap's Solution
+
+Using **Fully Homomorphic Encryption (FHE)**, LiquidSwap performs all AMM calculations on encrypted data without ever decrypting sensitive values on-chain:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  User Input:     100 LUSD (plaintext)                           │
+│       ↓                                                          │
+│  Encryption:     euint64(encrypted_handle)                      │
+│       ↓                                                          │
+│  Smart Contract: swap(euint64) → euint64 (all encrypted)        │
+│       ↓                                                          │
+│  Decryption:     Client-side via fhEVM 0.9.1 relayer            │
+│       ↓                                                          │
+│  User Output:    0.05 LETH (plaintext)                          │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## How It Works
+## Key Features
 
-### Fully Homomorphic Encryption (FHE)
-
-FHE allows computations on encrypted data without ever decrypting it. LiquidSwap uses Zama's fhEVM to perform AMM calculations entirely on encrypted values:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  User encrypts:   100 LUSD  →  euint64(encrypted)      │
-│  Smart contract:  swap(euint64) → euint64(output)      │
-│  User decrypts:   encrypted → 0.05 LETH                 │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Key Properties**:
-- **euint64**: 64-bit encrypted unsigned integers (supports up to 18.4 billion with 6 decimals)
-- **Homomorphic Operations**: Add, subtract, multiply encrypted values without decryption
-- **Zero-Knowledge Proofs**: All encrypted inputs include cryptographic proofs of validity
-- **Threshold Decryption**: Zama's coprocessor network handles asynchronous decryptions
-
-### Architecture Overview
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                         Frontend (React + Vite)               │
-│  ┌────────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-│  │   Wallet SDK   │  │  Zama Relayer │  │  FHE Encryption │  │
-│  │  (RainbowKit)  │  │    (Browser)  │  │   (Client-side) │  │
-│  └────────────────┘  └──────────────┘  └─────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
-                             │
-                             ▼
-┌──────────────────────────────────────────────────────────────┐
-│                Ethereum Sepolia (fhEVM 0.8.0)                │
-│  ┌──────────────────┐  ┌─────────────────┐                  │
-│  │   Swap Pair      │  │  ERC7984 Tokens │                  │
-│  │  (AMM Logic)     │  │  (LUSD / LETH)  │                  │
-│  └──────────────────┘  └─────────────────┘                  │
-│           │                      │                            │
-│           ▼                      ▼                            │
-│  ┌──────────────────────────────────────┐                   │
-│  │   Zama FHE Coprocessor               │                   │
-│  │   (Threshold Decryption Network)     │                   │
-│  └──────────────────────────────────────┘                   │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**Data Flow**:
-1. User encrypts swap amount in browser using Zama SDK
-2. Transaction is sent with encrypted handle + zero-knowledge proof
-3. Smart contract validates proof and performs encrypted computations
-4. For operations requiring decryption (price updates), contract requests async decryption
-5. Zama coprocessor network collectively decrypts and returns cleartext
-6. Contract processes callback and updates state
+| Feature | Description |
+|---------|-------------|
+| **Encrypted Swaps** | Token swap amounts remain hidden from observers |
+| **Private Balances** | ERC7984 tokens with encrypted balance storage |
+| **Obfuscated Reserves** | ±7% randomized reserve values for price feeds |
+| **MEV Protection** | Front-running mathematically impossible |
+| **Self-Relaying Decryption** | fhEVM 0.9.1 pattern—no centralized oracle |
+| **Queue Mode** | Per-user pending operations—multiple users can trade simultaneously |
+| **Timeout Protection** | 5-minute refund mechanism for stalled operations |
 
 ---
 
-## Smart Contract Design
+## Architecture
 
-### Core Contracts
+### System Architecture
 
-#### 1. **SwapPair Contract** (`contracts/LiquidSwap.sol`)
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                           Frontend Layer                                │
+│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────────────────┐ │
+│  │   React 18   │  │   Wagmi + Viem   │  │   FHE Client Encryption  │ │
+│  │   + Vite     │  │   RainbowKit     │  │   (fhEVM Browser SDK)    │ │
+│  └──────────────┘  └──────────────────┘  └──────────────────────────┘ │
+└─────────────────────────────────┬──────────────────────────────────────┘
+                                  │
+                                  ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                      Ethereum Sepolia (fhEVM 0.9.1)                     │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                      LiquidSwapPair Contract                      │  │
+│  │   • Encrypted reserves (euint64)                                 │  │
+│  │   • Confidential LP tokens (ERC7984)                             │  │
+│  │   • Self-relaying decryption callbacks                           │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────┐        ┌──────────────────────────────┐    │
+│  │   SwapLib Library    │        │   ERC7984 Confidential Tokens │    │
+│  │   (FHE computations) │        │   (LUSD / LETH)               │    │
+│  └──────────────────────┘        └──────────────────────────────┘    │
+│                                          │                            │
+│                                          ▼                            │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                    Zama FHE Coprocessor                          │  │
+│  │   • Threshold decryption network                                 │  │
+│  │   • Client-side decryption via relayer SDK                       │  │
+│  │   • Proof verification (FHE.checkSignatures)                     │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
-The main AMM implementation extending ERC7984 (confidential token standard):
+### Contract Architecture
+
+```
+contracts/
+├── LiquidSwap.sol              # Main Swap Pair contract (LiquidSwapPair)
+│   ├── ERC7984 inheritance     # Confidential LP token functionality
+│   ├── addLiquidity()          # Add liquidity with encrypted amounts
+│   ├── removeLiquidity()       # Remove liquidity
+│   ├── swapTokens()            # Token swap entry point
+│   ├── *Callback()             # fhEVM 0.9.1 callback handlers
+│   └── request*Refund()        # Timeout protection refunds
+│
+├── SwapLib.sol                 # FHE computation library
+│   ├── computeRNG()            # Encrypted random number generation
+│   ├── computeObfuscatedReserves()  # Reserve obfuscation
+│   ├── computeFirstMint()      # Initial liquidity computation
+│   ├── computeAddLiquidity()   # LP token calculation
+│   ├── computeAddLiquidityCallback()  # Callback computation
+│   ├── computeRemoveLiquidity()  # Withdrawal calculation
+│   └── computeSwap()           # AMM swap formula with 1% fee
+│
+├── ConfidentialToken.sol       # ERC7984 token implementation
+│   ├── euint64 balances        # Encrypted balance storage
+│   ├── setOperator()           # Authorization (replaces approve)
+│   ├── confidentialTransfer()  # Encrypted transfers
+│   └── mint()                  # Test token minting
+│
+└── OZ-confidential-contracts-fork/  # OpenZeppelin ERC7984 base
+    ├── ERC7984.sol             # Confidential token standard
+    └── IERC7984.sol            # Interface definitions
+```
+
+### Frontend Architecture
+
+```
+src/
+├── components/
+│   ├── MintCard.tsx            # Token minting interface
+│   ├── AddLiquidityCard.tsx    # Liquidity provision UI
+│   ├── SwapCard.tsx            # Token swap interface
+│   ├── Navbar.tsx              # Navigation with wallet connect
+│   ├── Hero.tsx                # Landing page hero section
+│   ├── Features.tsx            # Feature highlights
+│   ├── Stats.tsx               # Protocol statistics
+│   └── Footer.tsx              # Page footer
+│
+├── hooks/
+│   └── useSwapPair.ts          # Contract interaction hooks
+│       ├── useSwapTokens()     # Swap execution
+│       ├── useAddLiquidity()   # Liquidity adding
+│       ├── useRemoveLiquidity()  # Liquidity removal
+│       ├── useApproveToken()   # ERC7984 operator approval
+│       ├── use*Callback()      # fhEVM 0.9.1 callback submission
+│       └── useRequest*Refund() # Timeout refund requests
+│
+├── lib/
+│   ├── contracts.ts            # Contract addresses and ABIs
+│   └── fhe.ts                  # FHE encryption utilities
+│
+├── pages/
+│   └── Index.tsx               # Main landing page
+│
+└── config/
+    └── wagmi.ts                # Wallet configuration
+```
+
+---
+
+## AMM Mechanism
+
+### Constant Product Formula
+
+LiquidSwap implements the classic **x × y = k** constant product market maker formula, but with all computations performed on encrypted values:
+
+```
+reserve0 × reserve1 = k (constant)
+
+For a swap of Δx tokens:
+Δy = (reserve1 × Δx × 0.99) / (reserve0 + Δx × 0.99)
+```
+
+### Encrypted Swap Computation
+
+The `SwapLib.computeSwap()` function implements the AMM formula using FHE operations:
 
 ```solidity
-contract SwapPair is ERC7984, SepoliaConfig {
-    // Encrypted reserves
-    euint128 internal reserve0;
-    euint128 internal reserve1;
+function computeSwap(
+    euint64 sent0,      // Encrypted input amount (token0)
+    euint64 sent1,      // Encrypted input amount (token1)
+    euint64 reserve0,   // Encrypted reserve (token0)
+    euint64 reserve1    // Encrypted reserve (token1)
+) external returns (euint128, euint128, euint128, euint128) {
 
-    // Obfuscated reserves (±7% randomization for price oracles)
-    euint128 public obfuscatedReserve0;
-    euint128 public obfuscatedReserve1;
+    // Random obfuscation factor (3-16387 range)
+    euint16 rng0 = computeRNG(16384, 3);
+    euint16 rng1 = computeRNG(16384, 3);
 
-    // Pending decryption tracking
-    struct PendingDecryption {
-        uint256 currentRequestID;
-        bool isPendingDecryption;
-        uint256 decryptionTimestamp;
-        Operation operation; // AddLiquidity, RemoveLiquidity, Swap
-    }
+    // Apply 1% fee in the multiplier (99/100)
+    euint32 rng0Upper = FHE.div(FHE.mul(FHE.asEuint32(rng0), uint32(99)), uint32(100));
+    euint32 rng1Upper = FHE.div(FHE.mul(FHE.asEuint32(rng1), uint32(99)), uint32(100));
+
+    // Compute output amounts:
+    // amount0Out = (sent1 × reserve0 × rng0Upper) / (reserve1 × rng0)
+    euint128 divUpperPart0 = FHE.mul(
+        FHE.mul(FHE.asEuint128(sent1), FHE.asEuint128(reserve0)),
+        FHE.asEuint128(rng0Upper)
+    );
+    euint128 divLowerPart0 = FHE.mul(FHE.asEuint128(reserve1), FHE.asEuint128(rng0));
+
+    // amount1Out = (sent0 × reserve1 × rng1Upper) / (reserve0 × rng1)
+    euint128 divUpperPart1 = FHE.mul(
+        FHE.mul(FHE.asEuint128(sent0), FHE.asEuint128(reserve1)),
+        FHE.asEuint128(rng1Upper)
+    );
+    euint128 divLowerPart1 = FHE.mul(FHE.asEuint128(reserve0), FHE.asEuint128(rng1));
+
+    return (divUpperPart0, divUpperPart1, divLowerPart0, divLowerPart1);
 }
 ```
 
-**Key Features**:
-- **Encrypted State**: All reserves and balances stored as `euint64`/`euint128`
-- **Constant Product Formula**: `x * y = k` computed on encrypted values
-- **LP Tokens**: Minted as encrypted ERC7984 tokens
-- **Refund Mechanism**: Users can reclaim funds if decryption stalls
+### Fee Structure
 
-#### 2. **SwapLib** (`contracts/SwapLib.sol`)
-
-FHE utility library for advanced encrypted operations:
-
-```solidity
-library SwapLib {
-    // Compute encrypted swap: out = (reserve_out * amount_in * 99) / ((reserve_in * 100) + (amount_in * 99))
-    function computeSwap(euint64 amountIn, euint128 reserveIn, euint128 reserveOut)
-        internal returns (euint64 amountOut);
-
-    // Split encrypted value into upper 64 bits and lower 64 bits
-    function splitUpper64Lower64(euint128 encrypted128)
-        internal returns (euint64 upper64, euint64 lower64);
-
-    // Obfuscate reserves with ±7% randomization
-    function obfuscateReserves(euint128 reserve0, euint128 reserve1)
-        internal returns (euint128, euint128);
-}
-```
-
-#### 3. **ERC7984 Tokens** (`contracts/ConfidentialToken.sol`)
-
-Confidential token implementation with encrypted balances:
-
-```solidity
-contract ConfidentialToken is ERC7984 {
-    // Encrypted balance storage
-    mapping(address => euint64) internal _balances;
-
-    // Operator authorization (replaces traditional approve/allowance)
-    mapping(address => mapping(address => uint48)) public operators;
-
-    // Confidential transfer
-    function confidentialTransfer(address to, externalEuint64 encryptedAmount, bytes calldata inputProof)
-        external returns (euint64);
-}
-```
-
-**ERC7984 vs ERC20**:
-| Feature | ERC20 | ERC7984 |
-|---------|-------|---------|
-| Balance Storage | `uint256` | `euint64` (encrypted) |
-| Transfer Amount | Visible | Encrypted with ZK proof |
-| Approval System | `approve(spender, amount)` | `setOperator(operator, expiry)` |
-| Balance Query | Returns `uint256` | Returns encrypted handle |
-
-### Liquidity Management
-
-#### Adding Liquidity
-
-```solidity
-function addLiquidity(
-    externalEuint64 amount0,  // Encrypted LUSD amount
-    externalEuint64 amount1,  // Encrypted LETH amount
-    uint256 deadline,
-    bytes calldata inputProof
-) external {
-    // 1. Validate proof and convert to internal encrypted types
-    euint64 _amount0 = FHE.asEuint64(amount0, inputProof);
-    euint64 _amount1 = FHE.asEuint64(amount1, inputProof);
-
-    // 2. Transfer tokens from user (encrypted)
-    token0.confidentialTransferFrom(msg.sender, address(this), _amount0);
-    token1.confidentialTransferFrom(msg.sender, address(this), _amount1);
-
-    // 3. Request decryption to calculate LP tokens
-    uint256 requestID = requestDecryption(_amount0, _amount1);
-
-    // 4. Store bundle for callback processing
-    addLiqDecBundle[requestID] = AddLiqDecBundleStruct({
-        _sentAmount0: _amount0,
-        _sentAmount1: _amount1,
-        _user: msg.sender
-    });
-}
-
-// Callback from Zama coprocessor
-function callbackAddLiquidity(uint256 requestID, uint64 clear0, uint64 clear1) external {
-    // Calculate LP tokens: sqrt(amount0 * amount1)
-    uint256 liquidity = Math.sqrt(uint256(clear0) * uint256(clear1));
-
-    // Mint LP tokens to user
-    _mint(user, liquidity);
-
-    // Update reserves
-    reserve0 = FHE.add(reserve0, _sentAmount0);
-    reserve1 = FHE.add(reserve1, _sentAmount1);
-}
-```
-
-#### Removing Liquidity
-
-```solidity
-function removeLiquidity(
-    externalEuint64 lpAmount,
-    address to,
-    uint256 deadline,
-    bytes calldata inputProof
-) external {
-    // 1. Burn LP tokens
-    euint64 _lpAmount = FHE.asEuint64(lpAmount, inputProof);
-    _burn(msg.sender, uint256(_lpAmount));
-
-    // 2. Calculate proportional payout: (lpAmount / totalSupply) * reserve
-    euint128 payout0 = (reserve0 * lpAmount) / totalSupply;
-    euint128 payout1 = (reserve1 * lpAmount) / totalSupply;
-
-    // 3. Request decryption for final transfer
-    uint256 requestID = requestDecryption(payout0, payout1);
-}
-```
-
-### Asynchronous Decryption
-
-LiquidSwap uses threshold decryption for operations requiring cleartext:
-
-**Why Decryption is Needed**:
-- **Price Calculations**: Determining LP token amounts requires cleartext
-- **Constant Product Validation**: Ensuring `x * y = k` after swaps
-- **Refund Computation**: Calculating excess amounts to return
-
-**Decryption Flow**:
-```
-Contract → requestDecryption(euint64)
-         → Zama Coprocessor (threshold network)
-         → callback(requestID, cleartext)
-         → Contract processes cleartext
-```
-
-**Safety Mechanisms**:
-1. **Operation Gating**: Each callback verifies the operation type (AddLiquidity/RemoveLiquidity/Swap)
-2. **Request ID Validation**: Prevents replay attacks and out-of-order processing
-3. **Timeout Protection**: Users can request refunds if decryption stalls (>10 minutes)
-4. **Cleartext Validation**: Checks for zero divisors and invalid values
+| Fee Type | Rate | Implementation |
+|----------|------|----------------|
+| **Swap Fee** | 1% | Integrated into `rngUpper = rng × 99 / 100` |
+| **LP Withdrawal** | 0% | Full proportional share returned |
 
 ### Reserve Obfuscation
 
-To enable price oracles without exposing exact reserves:
+To enable price oracles without exposing exact reserves, LiquidSwap implements **±7% reserve obfuscation**:
 
 ```solidity
-function _updateObfuscatedReserves() internal {
-    // Generate random multipliers (93% - 107%)
-    euint16 random0 = FHE.randomEuint16() % 1400 + 9300; // 0.93x - 1.07x
-    euint16 random1 = FHE.randomEuint16() % 1400 + 9300;
+function computeObfuscatedReserves(
+    euint64 reserve0,
+    euint64 reserve1,
+    uint64 scalingFactor
+) external returns (euint128, euint128) {
+    // Generate random percentage (70-326 range)
+    euint16 percentage = computeRNG(256, 70);  // 70 + (0-255) = 70-325
 
-    // Apply randomization: obfuscated = (reserve * random) / 10000
-    obfuscatedReserve0 = (reserve0 * random0) / 10000;
-    obfuscatedReserve1 = (reserve1 * random1) / 10000;
+    // Scale to basis points: 7000-32600
+    euint16 scaledPercentage = FHE.mul(percentage, 100);
 
-    // Grant read permissions to price scanners
-    FHE.allow(obfuscatedReserve0, priceScanner);
-    FHE.allow(obfuscatedReserve1, priceScanner);
+    // Upper bound: scalingFactor + scaledPercentage (~93%-107%)
+    euint32 upperBound = FHE.add(FHE.asEuint32(scaledPercentage), uint32(scalingFactor));
+    // Lower bound: scalingFactor - scaledPercentage (~93%-107%)
+    euint32 lowerBound = FHE.sub(uint32(scalingFactor), FHE.asEuint32(scaledPercentage));
+
+    // Randomly select upper or lower multiplier for each reserve
+    ebool randomBool0 = FHE.randEbool();
+    ebool randomBool1 = FHE.randEbool();
+
+    euint32 reserve0Multiplier = FHE.select(randomBool0, upperBound, lowerBound);
+    euint32 reserve1Multiplier = FHE.select(randomBool1, lowerBound, upperBound);
+
+    // Apply additional random multiplier (3+)
+    euint16 rngMultiplier = computeRNG(0, 3);
+
+    euint64 reserve0Factor = FHE.mul(FHE.asEuint64(reserve0Multiplier), rngMultiplier);
+    euint64 reserve1Factor = FHE.mul(FHE.asEuint64(reserve1Multiplier), rngMultiplier);
+
+    euint128 _obfuscatedReserve0 = FHE.mul(FHE.asEuint128(reserve0), reserve0Factor);
+    euint128 _obfuscatedReserve1 = FHE.mul(FHE.asEuint128(reserve1), reserve1Factor);
+
+    return (_obfuscatedReserve0, _obfuscatedReserve1);
 }
 ```
 
-**Use Cases**:
-- Price feeds can estimate exchange rates within ±7%
+**Benefits**:
+- Price oracles can estimate exchange rates within ±7% accuracy
 - MEV bots cannot determine exact reserve ratios
-- Arbitrage opportunities remain profitable but less precise
+- Arbitrage remains profitable but less precise
 
 ---
 
-## Frontend Integration
+## fhEVM 0.9.1 Self-Relaying Pattern
 
-### Technology Stack
+### Overview
 
-- **React 18** + **TypeScript** + **Vite** - Modern development experience
-- **Wagmi v2** + **RainbowKit** - Wallet connection and transaction management
-- **Zama fhEVM SDK** - Client-side FHE encryption
-- **Tailwind CSS** + **shadcn/ui** - Responsive, accessible UI components
-- **React Router** - Client-side routing for docs page
+fhEVM 0.9.1 introduces a **self-relaying decryption pattern** that eliminates the need for centralized oracle callbacks. Instead:
 
-### FHE Encryption Flow
+1. Contract marks encrypted values as **publicly decryptable**
+2. Client uses the **relayer SDK** to decrypt off-chain
+3. Client submits decrypted values + **cryptographic proof** back to contract
+4. Contract verifies proof with `FHE.checkSignatures()`
 
-```typescript
-// 1. Initialize FHE instance with contract address
-import { createFheInstance } from '@/lib/fhe';
+### Decryption Flow
 
-const fheInstance = await createFheInstance(SWAP_PAIR_ADDRESS, userAddress);
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 1: User initiates swap                                              │
+│         → swapTokens(encryptedAmount0, encryptedAmount1, ...)           │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Contract computes encrypted output & marks for decryption       │
+│         → FHE.makePubliclyDecryptable(divLowerPart0)                    │
+│         → FHE.makePubliclyDecryptable(divLowerPart1)                    │
+│         → emit DecryptionPending(user, requestID, Swap, handles)        │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 3: Client listens for DecryptionPending event                      │
+│         → Extract handles[] from event                                  │
+│         → Call relayer SDK to decrypt handles                           │
+│         → Receive cleartexts + decryptionProof                          │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 4: Client submits callback                                          │
+│         → swapTokensCallback(requestID, cleartexts, decryptionProof)    │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 5: Contract verifies & completes operation                         │
+│         → FHE.checkSignatures(handles, cleartexts, proof)               │
+│         → Decode cleartexts & compute final output                       │
+│         → Transfer tokens to user                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-// 2. Encrypt user input
-const amount = parseUnits("100", 6); // 100 LUSD
-const { handle, proof } = await fheInstance.encryptUint64(
-  amount,
-  SWAP_PAIR_ADDRESS,
-  userAddress
+### Operation Lifecycle
+
+Each operation (AddLiquidity, RemoveLiquidity, Swap) follows a two-phase lifecycle:
+
+| Phase | State | Actions |
+|-------|-------|---------|
+| **Phase 1** | `hasPending = true` | Tokens transferred to pool, bundle stored, `DecryptionPending` emitted |
+| **Phase 2** | `hasPending = false` | Callback verified, final computation, tokens transferred |
+| **Timeout** | After 5 minutes | User can call `request*Refund()` to recover tokens |
+
+---
+
+## Queue Mode Architecture
+
+### The Problem: Global Lock
+
+In traditional FHE AMM designs, a **global pending operation lock** blocks ALL users when ANY user has an operation in progress:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ❌ GLOBAL LOCK (Original Design)                                        │
+│                                                                          │
+│  User A: addLiquidity() → pendingOperation = true                       │
+│                    ↓                                                      │
+│  User B: swapTokens() → REVERTS! "Operation in progress"               │
+│  User C: addLiquidity() → REVERTS! "Operation in progress"             │
+│                    ↓                                                      │
+│  User A: callback() → pendingOperation = false                          │
+│                    ↓                                                      │
+│  User B & C: Can now proceed (one at a time)                            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+This creates severe UX issues:
+- Only **one user** can interact with the pool at a time
+- Users must wait for others' callbacks to complete
+- High-traffic pools become unusable
+
+### The Solution: Queue Mode
+
+LiquidSwap implements **Queue Mode**—each user has their own independent pending operation state:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ✅ QUEUE MODE (Current Design)                                          │
+│                                                                          │
+│  User A: addLiquidity() → userPendingOperation[A].hasPending = true    │
+│  User B: swapTokens()   → userPendingOperation[B].hasPending = true    │
+│  User C: addLiquidity() → userPendingOperation[C].hasPending = true    │
+│                    ↓                                                      │
+│  All operations process independently!                                   │
+│                    ↓                                                      │
+│  User B: callback() → userPendingOperation[B].hasPending = false       │
+│  User A: callback() → userPendingOperation[A].hasPending = false       │
+│  User C: callback() → userPendingOperation[C].hasPending = false       │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Per-User Pending Operations
+
+Queue Mode replaces the global lock with a per-user mapping:
+
+```solidity
+// Per-user pending operation tracking
+struct userPendingOperationStruct {
+    uint256 requestID;        // Unique request identifier
+    Operation operation;      // AddLiquidity, RemoveLiquidity, or Swap
+    uint256 timestamp;        // When operation was initiated
+    bool hasPending;          // Whether user has an active operation
+}
+
+// Each user has their own pending state
+mapping(address user => userPendingOperationStruct) public userPendingOperation;
+```
+
+### User Operation Modifier
+
+The `userOperationAvailable()` modifier only checks the **calling user's** state:
+
+```solidity
+modifier userOperationAvailable() {
+    userPendingOperationStruct memory pending = userPendingOperation[msg.sender];
+    if (
+        pending.hasPending &&
+        block.timestamp < pending.timestamp + MAX_OPERATION_TIME
+    ) {
+        revert UserHasPendingOperation(
+            msg.sender,
+            pending.requestID,
+            pending.timestamp + MAX_OPERATION_TIME
+        );
+    }
+    _;
+}
+```
+
+### Concurrent User Support
+
+| Feature | Global Lock | Queue Mode |
+|---------|-------------|------------|
+| **Concurrent Users** | 1 | Unlimited |
+| **Blocking Scope** | All users | Only initiating user |
+| **Pool Availability** | Intermittent | Always available |
+| **Throughput** | Low | High |
+| **User Experience** | Poor | Excellent |
+
+### Query Functions
+
+```solidity
+// Get pending operation for a specific user
+function getUserPendingOperationInfo(address user) external view returns (
+    uint256 requestID,
+    bool hasPending,
+    uint256 timestamp,
+    Operation operation
 );
 
-// 3. Send transaction with encrypted data
-await contract.write.addLiquidity([
-  handle,    // euint64 (32 bytes)
-  deadline,  // uint256
-  proof      // bytes (ZK proof)
-]);
+// Backward compatible: Get caller's pending operation
+function getPendingOperationInfo() external view returns (
+    uint256 requestID,
+    bool isPending,
+    uint256 timestamp,
+    Operation operation
+);
 ```
 
-### Key Frontend Features
+### Frontend Integration
 
-**1. Mint Card** - Request test tokens
+The frontend uses the per-user query to check operation status:
+
 ```typescript
-// Encrypt mint amount with FHE
-const { handle, proof } = await encryptUint64(amount, tokenAddress, address);
+// Hook queries user-specific pending state
+export function usePendingDecryptionInfo(userAddress?: `0x${string}`) {
+  const { data } = useReadContract({
+    address: SWAP_PAIR_ADDRESS,
+    abi: SWAP_PAIR_ABI,
+    functionName: 'getUserPendingOperationInfo',
+    args: userAddress ? [userAddress] : undefined,
+  });
 
-// Mint encrypted tokens
-await token.write.mint([address, handle, proof]);
+  return {
+    pendingDecryption: data ? {
+      requestID: data[0],
+      hasPending: data[1],
+      timestamp: data[2],
+      operation: data[3],
+    } : null,
+  };
+}
 ```
 
-**2. Add Liquidity Card** - Provide liquidity to pool
-- Dual token input (LUSD + LETH)
-- Authorization via ERC7984 `setOperator`
-- Real-time transaction monitoring with Etherscan links
-- Pending decryption status display
+---
 
-**3. Swap Card** (Under Development)
-- Single-sided input with automatic output calculation
-- Slippage protection
-- Price impact warnings
+## Smart Contract Reference
+
+### LiquidSwapPair (LiquidSwap.sol)
+
+The main swap pair contract implementing the confidential AMM.
+
+#### Key State Variables
+
+```solidity
+// Encrypted reserves
+euint64 private reserve0;
+euint64 private reserve1;
+
+// Obfuscated reserves for price feeds (±7%)
+obfuscatedReservesStruct public obfuscatedReserves;
+
+// Queue Mode: Per-user pending operation tracking
+struct userPendingOperationStruct {
+    uint256 requestID;
+    Operation operation;
+    uint256 timestamp;
+    bool hasPending;
+}
+mapping(address user => userPendingOperationStruct) public userPendingOperation;
+
+// Constants
+uint64 public immutable scalingFactor;        // 10^6 (6 decimals)
+uint64 public immutable MINIMUM_LIQUIDITY;    // 100 × scalingFactor
+uint256 private constant MAX_OPERATION_TIME = 5 minutes;
+```
+
+#### Core Functions
+
+| Function | Description |
+|----------|-------------|
+| `addLiquidity(encryptedAmount0, encryptedAmount1, deadline, inputProof)` | Add liquidity with encrypted amounts |
+| `addLiquidityCallback(requestID, cleartexts, proof)` | Complete liquidity addition after decryption |
+| `removeLiquidity(encryptedLPAmount, to, deadline, inputProof)` | Remove liquidity |
+| `removeLiquidityCallback(requestID, cleartexts, proof)` | Complete liquidity removal |
+| `swapTokens(encryptedAmount0In, encryptedAmount1In, to, deadline, inputProof)` | Execute swap |
+| `swapTokensCallback(requestID, cleartexts, proof)` | Complete swap after decryption |
+| `getUserPendingOperationInfo(address user)` | **Queue Mode**: Get pending operation for specific user |
+| `getPendingOperationInfo()` | Get caller's pending operation (backward compatible) |
+| `requestLiquidityAddingRefund(requestID)` | Refund stalled add-liquidity |
+| `requestSwapRefund(requestID)` | Refund stalled swap |
+| `requestLiquidityRemovalRefund(requestID)` | Refund stalled remove-liquidity |
+
+#### Events
+
+```solidity
+event DecryptionPending(
+    address indexed from,
+    uint256 indexed requestID,
+    Operation operation,
+    bytes32[] handles
+);
+event liquidityMinted(uint256 blockNumber, address user);
+event liquidityBurnt(uint256 blockNumber, address user);
+event Swap(
+    address from,
+    euint64 amount0In,
+    euint64 amount1In,
+    euint64 amount0Out,
+    euint64 amount1Out,
+    address to
+);
+event Refund(address from, uint256 blockNumber, uint256 requestID);
+```
+
+#### Errors (Queue Mode)
+
+```solidity
+// Reverts when user already has a pending operation
+error UserHasPendingOperation(
+    address user,           // The user with pending operation
+    uint256 requestID,      // The pending request ID
+    uint256 until           // Timestamp when operation expires
+);
+```
+
+### SwapLib
+
+FHE utility library for encrypted AMM computations.
+
+| Function | Gas Cost (HCU) | Description |
+|----------|----------------|-------------|
+| `computeRNG(max, minAdd)` | ~184,000 | Generate bounded random euint16 |
+| `computeObfuscatedReserves(r0, r1, scale)` | ~2,000,000 | Randomize reserves ±7% |
+| `computeFirstMint(a0, a1, minLiq)` | ~500,000 | Initial LP token calculation |
+| `computeAddLiquidity(r0, r1, supply)` | ~2,500,000 | Prepare liquidity addition |
+| `computeAddLiquidityCallback(...)` | ~4,000,000 | Process liquidity callback |
+| `computeRemoveLiquidity(r0, r1, lp, supply)` | ~2,500,000 | Prepare liquidity removal |
+| `computeSwap(s0, s1, r0, r1)` | ~3,000,000 | AMM swap calculation with 1% fee |
+
+### ConfidentialToken (ERC7984)
+
+Confidential token standard with encrypted balances.
+
+#### Key Differences from ERC20
+
+| Feature | ERC20 | ERC7984 |
+|---------|-------|---------|
+| Balance Type | `uint256` | `euint64` (encrypted) |
+| Transfer Amount | Visible | Encrypted + ZK proof |
+| Approval System | `approve(spender, amount)` | `setOperator(operator, expiry)` |
+| Balance Query | Returns plaintext | Returns encrypted handle |
+
+#### Core Functions
+
+```solidity
+function confidentialBalanceOf(address account) external view returns (euint64);
+function setOperator(address operator, uint48 until) external;
+function isOperator(address holder, address spender) external view returns (bool);
+function confidentialTransfer(address to, euint64 amount) external;
+function confidentialTransferFrom(address from, address to, euint64 amount) external;
+function mint(address to, externalEuint64 amount, bytes calldata inputProof) external;
+```
 
 ---
 
 ## Deployed Contracts
 
-### Sepolia Testnet
+### Ethereum Sepolia Testnet (Queue Mode v2)
 
-| Contract | Address | Explorer |
-|----------|---------|----------|
-| **Swap Pair** | `0xc68abF4A812060b587Cd9CC9Bba6a9e2D1df00e0` | [View on Etherscan](https://sepolia.etherscan.io/address/0xc68abF4A812060b587Cd9CC9Bba6a9e2D1df00e0) |
-| **Liquid USD (LUSD)** | `0x534df81296D12C971a6BF8BfA609eD744e2610A3` | [View on Etherscan](https://sepolia.etherscan.io/address/0x534df81296D12C971a6BF8BfA609eD744e2610A3) |
-| **Liquid ETH (LETH)** | `0xf678ca1012Cf4AD86F4FD2BbBfc25a34F915b3fA` | [View on Etherscan](https://sepolia.etherscan.io/address/0xf678ca1012Cf4AD86F4FD2BbBfc25a34F915b3fA) |
+| Contract | Address | Etherscan |
+|----------|---------|-----------|
+| **LiquidSwapPair** | `0xBd616c7bC7423D07a11018ed324d178586DC6128` | [View](https://sepolia.etherscan.io/address/0xBd616c7bC7423D07a11018ed324d178586DC6128) |
+| **Liquid USD (LUSD)** | `0x1A15cF37a5E13e01774d2007DEA79Fc6eA52CEa9` | [View](https://sepolia.etherscan.io/address/0x1A15cF37a5E13e01774d2007DEA79Fc6eA52CEa9) |
+| **Liquid ETH (LETH)** | `0xc5731f5Da1E7d8dBfc99f187E1766f91e8e59bFB` | [View](https://sepolia.etherscan.io/address/0xc5731f5Da1E7d8dBfc99f187E1766f91e8e59bFB) |
+
+---
+
+## Dependency Versions
+
+### Smart Contracts
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| **Solidity** | `0.8.27` | Smart contract language |
+| **fhEVM Solidity** | `^0.9.1` | FHE library (Zama) |
+| **fhEVM Hardhat Plugin** | `^0.3.0-1` | Hardhat integration |
+| **Hardhat** | `^2.26.3` | Development framework |
+| **Hardhat Toolbox** | `^5.0.0` | Testing & deployment tools |
+
+### Compiler Settings
+
+```javascript
+solidity: {
+  version: '0.8.27',
+  settings: {
+    optimizer: { enabled: true, runs: 50 },
+    evmVersion: 'cancun',
+    viaIR: true
+  }
+}
+```
+
+### Frontend
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| **React** | `^18.3.1` | UI framework |
+| **TypeScript** | `^5.8.3` | Type safety |
+| **Vite** | `^5.4.19` | Build tool |
+| **Wagmi** | `^2.19.1` | Ethereum interactions |
+| **Viem** | `^2.38.5` | Low-level Ethereum utilities |
+| **RainbowKit** | `^2.2.9` | Wallet connection UI |
+| **TanStack React Query** | `^5.83.0` | Server state management |
+| **Tailwind CSS** | `^3.4.17` | Styling |
+| **shadcn/ui** | (Radix primitives) | UI components |
+| **Vitest** | `^1.6.0` | Testing framework |
 
 ---
 
@@ -376,140 +679,48 @@ await token.write.mint([address, handle, proof]);
 
 ### Prerequisites
 
-- Node.js 18+ and npm/yarn
+- Node.js 18+
 - MetaMask or compatible Web3 wallet
-- Sepolia testnet ETH ([Get from faucet](https://sepoliafaucet.com))
+- Sepolia testnet ETH ([Faucet](https://sepoliafaucet.com))
 
 ### Installation
 
 ```bash
 # Clone repository
-git clone https://github.com/y6qom3fjycxn8/LiquidSwap.git
+git clone https://github.com/your-repo/LiquidSwap.git
 cd LiquidSwap
 
 # Install dependencies
 npm install
 
-# Set up environment variables
+# Set up environment
 cp .env.example .env
-# Add your private key and RPC URL to .env
+# Add PRIVATE_KEY and SEPOLIA_RPC_URL to .env
 ```
 
-### Running Locally
+### Development
 
 ```bash
-# Start development server
+# Start frontend development server
 npm run dev
+# → http://localhost:5173
 
-# Frontend available at http://localhost:8080
-```
-
-### Deploying Contracts
-
-```bash
 # Compile contracts
-npx hardhat compile
+npm run compile
 
 # Deploy to Sepolia
-SEPOLIA_RPC_URL="<your-rpc-url>" npx hardhat run scripts/deploy.cjs --network sepolia
-
-# Update frontend contract addresses in src/config/contracts.ts
-```
-
----
-
-## Development
-
-### Project Structure
-
-```
-LiquidSwap/
-├── contracts/
-│   ├── LiquidSwap.sol              # Main Swap Pair contract
-│   ├── SwapLib.sol                 # FHE utility library
-│   ├── ConfidentialToken.sol       # ERC7984 token implementation
-│   └── OZ-confidential-contracts-fork/  # ERC7984 dependencies
-├── scripts/
-│   ├── deploy.cjs                  # Deployment script
-│   ├── check-pending-decryption.cjs # Debug utility
-│   └── request-refund.cjs          # Emergency refund tool
-├── src/
-│   ├── components/
-│   │   ├── MintCard.tsx            # Token minting interface
-│   │   ├── AddLiquidityCard.tsx    # Liquidity provision UI
-│   │   └── SwapCard.tsx            # Swap interface (in dev)
-│   ├── hooks/
-│   │   └── useSwapPair.ts          # Contract interaction hooks
-│   ├── config/
-│   │   ├── contracts.ts            # Contract addresses & ABIs
-│   │   └── wagmi.ts                # Wallet configuration
-│   └── lib/
-│       └── fhe.ts                  # FHE encryption utilities
-└── deployments/                    # Deployment history
+SEPOLIA_RPC_URL="<your-rpc>" PRIVATE_KEY="<your-key>" npm run deploy
 ```
 
 ### Testing
 
 ```bash
-# Run contract tests
-npx hardhat test
+# Run frontend tests
+npm test
 
-# Check pending decryptions
-SEPOLIA_RPC_URL="<rpc-url>" npx hardhat run scripts/check-pending-decryption.cjs --network sepolia
-
-# Request refund (if decryption stalls)
-SEPOLIA_RPC_URL="<rpc-url>" npx hardhat run scripts/request-refund.cjs --network sepolia
+# Compile contracts
+npx hardhat compile --config hardhat.config.cjs
 ```
-
-### Gas Optimization
-
-LiquidSwap uses **HCU (Homomorphic Computation Units)** instead of traditional gas:
-
-| Operation | HCU Cost | Description |
-|-----------|----------|-------------|
-| `FHE.add()` | 65,000 | Add two encrypted values |
-| `FHE.mul()` | 150,000 | Multiply encrypted values |
-| `FHE.div()` | 265,000 | Divide with encrypted divisor |
-| `FHE.randomEuint16()` | 100,000 | Generate random encrypted value |
-| `requestDecryption()` | 500,000+ | Async decryption request |
-
-**Optimization Strategies**:
-- Batch multiple operations in single transaction
-- Use `euint64` instead of `euint128` when possible (smaller ciphertext)
-- Cache obfuscated reserves to avoid redundant computations
-
----
-
-## Roadmap
-
-### ✅ Phase 1: Core Infrastructure (Completed)
-- [x] ERC7984 confidential token standard
-- [x] Encrypted liquidity pool management
-- [x] Asynchronous decryption framework
-- [x] Reserve obfuscation for price feeds
-- [x] Frontend with wallet integration
-- [x] Testnet deployment on Sepolia
-
-### 🚧 Phase 2: Swap Functionality (In Progress)
-- [ ] Complete encrypted swap implementation
-- [ ] Slippage protection
-- [ ] Price impact calculations
-- [ ] Multi-hop routing (LUSD → LETH → Other)
-- [ ] Advanced order types (limit orders)
-
-### 🔮 Phase 3: Advanced Features (Planned)
-- [ ] **Liquidity Mining**: Encrypted staking rewards
-- [ ] **Governance**: Private voting on protocol parameters
-- [ ] **Analytics Dashboard**: Privacy-preserving statistics
-- [ ] **Cross-chain Bridge**: Encrypted asset transfers
-- [ ] **Mobile App**: React Native integration
-- [ ] **Mainnet Deployment**: Production launch on Ethereum mainnet
-
-### 🔬 Phase 4: Research & Innovation
-- [ ] **Concentrated Liquidity**: Uniswap v3-style range orders with FHE
-- [ ] **Flash Swaps**: Encrypted atomic arbitrage
-- [ ] **Privacy-preserving Oracle**: Decentralized price feeds
-- [ ] **ZK-FHE Hybrid**: Combine zero-knowledge and FHE for ultimate privacy
 
 ---
 
@@ -521,80 +732,34 @@ LiquidSwap uses **HCU (Homomorphic Computation Units)** instead of traditional g
 - ✅ Front-running and MEV attacks (encrypted amounts)
 - ✅ Balance tracking by external observers
 - ✅ Liquidity position surveillance
-- ✅ Timing attacks on swap execution
+- ✅ Exact reserve exposure (±7% obfuscation)
+- ✅ DoS via global lock (Queue Mode eliminates this vector)
 
 **Current Limitations**:
-- ⚠️ Wallet addresses are public (transaction graph analysis possible)
-- ⚠️ Transaction counts reveal user activity
-- ⚠️ Decryption callbacks temporarily expose cleartext to validators
-- ⚠️ Testnet only - not audited for production use
+- ⚠️ Wallet addresses remain public
+- ⚠️ Transaction counts reveal activity patterns
+- ⚠️ Callback cleartexts are publicly verifiable
+- ⚠️ Each user limited to one pending operation at a time
+- ⚠️ **NOT AUDITED** — Testnet only
 
 ### Best Practices
 
-1. **Never Reuse Addresses**: Create new wallets for each trading session
-2. **Batch Transactions**: Reduce on-chain activity correlation
-3. **Use Tornado Cash**: Mix funds before interacting with LiquidSwap
-4. **Monitor Pending Decryptions**: Request refunds if operations stall >10 minutes
-5. **Verify Encryption**: Always check ZK proof generation succeeded
-
-### Audits
-
-🔴 **NOT AUDITED** - This is experimental software. Use at your own risk.
-
-Future audit targets:
-- Trail of Bits (FHE security)
-- OpenZeppelin (Smart contract security)
-- Least Authority (Cryptographic review)
-
----
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-**Areas We Need Help**:
-- Frontend UX improvements
-- Gas optimization in smart contracts
-- Documentation and tutorials
-- Security testing and bug bounties
+1. **Fresh Wallets**: Use new addresses for trading sessions
+2. **Monitor Timeouts**: Request refunds if operations stall >5 minutes
+3. **Verify Encryption**: Ensure ZK proof generation succeeds before submitting
 
 ---
 
 ## License
 
-This project is licensed under the **BSD-3-Clause-Clear License**.
-
-Key terms:
-- ✅ Commercial use allowed
-- ✅ Modification and redistribution permitted
-- ❌ No patent rights granted
-- ❌ No liability or warranty
-
-See [LICENSE](LICENSE) for full details.
-
----
-
-## Acknowledgments
-
-- **Zama**: For pioneering FHE technology and fhEVM
-- **Uniswap**: Inspiration for AMM design
-- **OpenZeppelin**: Security best practices and ERC standards
-
----
-
-## Contact & Support
-
-- **Website**: [fhe-liquidswap.vercel.app](https://fhe-liquidswap.vercel.app)
-- **GitHub Issues**: [Report bugs](https://github.com/y6qom3fjycxn8/LiquidSwap/issues)
-- **Twitter**: [@LiquidSwapFHE](https://twitter.com/LiquidSwapFHE) (if exists)
-- **Discord**: [Join community](https://discord.gg/liquidswap) (if exists)
+BSD-3-Clause-Clear License
 
 ---
 
 <div align="center">
 
-**Built with ❤️ using Zama FHE technology**
+**Built with Zama FHE Technology**
 
-[⬆ Back to Top](#liquidswap)
+[fhe-liquidswap.vercel.app](https://fhe-liquidswap.vercel.app)
 
 </div>
